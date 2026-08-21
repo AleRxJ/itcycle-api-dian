@@ -1,0 +1,155 @@
+// ITCycle data model.
+//
+// Everything here is ITCycle's own persistence layer (tenants, config,
+// certificates, documents) — none of this duplicates dian-kit, which stays
+// stateless (it only builds/signs/sends XML). See docs/dian/compatibility.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Mirrors DIAN's TipoAmbiente codes directly ("1" = Produccion, "2" = Habilitacion)
+/// so it can be passed straight through to dian-kit without translation.
+enum DianEnvironment {
+  PRODUCTION
+  SANDBOX
+}
+
+enum InvoiceStatus {
+  PENDING
+  PROCESSING
+  SENT
+  ACCEPTED
+  REJECTED
+  ERROR
+  CONTINGENCY
+}
+
+/// A tenant of ITCycle: one company/person that issues electronic documents.
+/// Every other table is scoped to a companyId — no record may ever be
+/// readable or usable by a different company.
+model Company {
+  id         String       @id @default(cuid())
+  name       String
+  nit        String
+  dv         String
+  personType String // DIAN PersonType code: "1" Juridica, "2" Natural
+  status     RecordStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dianConfiguration    DianConfiguration?
+  numberingResolutions NumberingResolution[]
+  certificates         Certificate[]
+  invoices             Invoice[]
+
+  @@unique([nit, dv])
+}
+
+/// DIAN registration details for a company's software (habilitacion).
+/// One-to-one with Company: a tenant has a single active DIAN registration
+/// at a time.
+model DianConfiguration {
+  id            String          @id @default(cuid())
+  companyId     String          @unique
+  environment   DianEnvironment
+  softwareId    String
+  softwarePin   String
+  technicalKey  String?
+  status        RecordStatus    @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+/// A DIAN numbering authorization (resolucion de numeracion) assigned to a
+/// company. A company may hold multiple resolutions over time (renewals,
+/// different prefixes); `currentNumber` tracks the next number to issue.
+model NumberingResolution {
+  id               String       @id @default(cuid())
+  companyId        String
+  prefix           String
+  resolutionNumber String
+  startNumber      Int
+  endNumber        Int
+  currentNumber    Int
+  startDate        DateTime
+  endDate          DateTime
+  status           RecordStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@unique([companyId, prefix])
+  @@index([companyId])
+}
+
+/// Metadata about a digital certificate used to sign a company's documents.
+/// The private key/secret itself is NEVER stored here — `secretReference`
+/// only points into a CertificateSecretStore (Vault/KMS/etc).
+model Certificate {
+  id                     String       @id @default(cuid())
+  companyId              String
+  provider               String // e.g. "firmapass"
+  certificateIdentifier  String // provider-side reference, not the cert itself
+  secretReference        String // pointer into CertificateSecretStore
+  expiresAt              DateTime
+  status                 RecordStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@index([companyId])
+}
+
+/// An electronic invoice (Factura de Venta) issued by a company. Notes,
+/// debit notes, and equivalent documents will get their own models later
+/// (see docs — not implemented yet).
+model Invoice {
+  id                  String        @id @default(cuid())
+  companyId           String
+  numberingId         String?
+  certificateId        String?
+  internalReference   String // idempotency key (e.g. Idempotency-Key header)
+  invoiceNumber        String? // full number, e.g. "SETP990000001"
+  prefix               String?
+  cufe                 String?
+  status               InvoiceStatus @default(PENDING)
+  xmlReference          String? // pointer to stored signed XML (not inlined here)
+  dianResponseReference String? // pointer to stored raw DIAN response
+  issuedAt              DateTime?
+  sentAt                DateTime?
+  acceptedAt            DateTime?
+  rejectedAt            DateTime?
+  errorCode             String?
+  errorMessage          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  numbering   NumberingResolution? @relation(fields: [numberingId], references: [id])
+  certificate Certificate?         @relation(fields: [certificateId], references: [id])
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
+}
