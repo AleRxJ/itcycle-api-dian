@@ -9,6 +9,8 @@ dist/
 *.p12
 *.pfx
 *.key
+*.password
+/certs/
 .env
 .env.*
 !.env.example

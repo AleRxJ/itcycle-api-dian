@@ -61,13 +61,18 @@ model Company {
 /// One-to-one with Company: a tenant has a single active DIAN registration
 /// at a time.
 model DianConfiguration {
-  id            String          @id @default(cuid())
-  companyId     String          @unique
-  environment   DianEnvironment
-  softwareId    String
-  softwarePin   String
-  technicalKey  String?
-  status        RecordStatus    @default(ACTIVE)
+  id              String          @id @default(cuid())
+  companyId       String          @unique
+  environment     DianEnvironment
+  softwareId      String
+  softwarePin     String
+  technicalKey    String?
+  /// Full dian-kit `Party` shape for the supplier (name, identification,
+  /// personType, fiscalResponsibilities, taxInfo, address, email). Kept as
+  /// JSON rather than normalized columns until ITCycle needs to query into
+  /// it — it is passed straight through to DianKitProvider as-is.
+  supplierProfile Json?
+  status          RecordStatus    @default(ACTIVE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
