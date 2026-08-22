@@ -5,9 +5,17 @@ import type { CertificateSecretStore } from "../../providers/certificates/Certif
 import { LocalFileCertificateSecretStore } from "../../providers/certificates/LocalFileCertificateSecretStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
+import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 import { env } from "../../shared/env.js";
 
 const defaultSecretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
+
+function defaultCreateProvider(config: DianKitConfig): DianProvider {
+  // DIAN_SIMULATION_MODE unblocks local dev/demos without a real DIAN
+  // Sandbox registration — dian-kit still builds/signs a real document, only
+  // the send to DIAN itself is simulated. See docs/dian/simulation.md.
+  return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
+}
 
 export interface TestInvoiceParams {
   companyId: string;
@@ -19,7 +27,7 @@ export interface TestInvoiceParams {
 export interface TestInvoiceDeps {
   /** @defaultValue a LocalFileCertificateSecretStore over CERTIFICATES_DIR */
   secretStore?: CertificateSecretStore;
-  /** @defaultValue `(config) => new DianKitProvider(config)` — override in tests to avoid touching dian-kit/DIAN at all. */
+  /** @defaultValue DianKitProvider, or SimulatedDianProvider when DIAN_SIMULATION_MODE=true */
   createProvider?: (config: DianKitConfig) => DianProvider;
 }
 
@@ -35,7 +43,11 @@ export async function createTestInvoice(
   deps: TestInvoiceDeps = {},
 ) {
   const secretStore = deps.secretStore ?? defaultSecretStore;
-  const createProvider = deps.createProvider ?? ((config: DianKitConfig) => new DianKitProvider(config));
+  const createProvider = deps.createProvider ?? defaultCreateProvider;
+  // Only the app's own DIAN_SIMULATION_MODE counts as "simulated" for
+  // persistence purposes — a caller-injected provider (e.g. in tests) isn't
+  // what that flag is meant to record.
+  const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.invoice.findUnique({
     where: {
@@ -114,6 +126,7 @@ export async function createTestInvoice(
         prefix: numbering.prefix,
         cufe: document.uuid,
         status: response.isValid ? "ACCEPTED" : "REJECTED",
+        simulated,
         issuedAt: new Date(),
         sentAt: new Date(),
         acceptedAt: response.isValid ? new Date() : null,
@@ -125,6 +138,7 @@ export async function createTestInvoice(
       where: { id: invoiceRecord.id },
       data: {
         status: "ERROR",
+        simulated,
         errorMessage: error instanceof Error ? error.message : String(error),
       },
     });

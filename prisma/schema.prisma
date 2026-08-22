@@ -139,6 +139,10 @@ model Invoice {
   prefix               String?
   cufe                 String?
   status               InvoiceStatus @default(PENDING)
+  /// True when `send` went through SimulatedDianProvider instead of a real
+  /// DIAN connection (DIAN_SIMULATION_MODE). ACCEPTED + simulated=true is
+  /// NOT a real DIAN acceptance — see docs/dian/simulation.md.
+  simulated             Boolean       @default(false)
   xmlReference          String? // pointer to stored signed XML (not inlined here)
   dianResponseReference String? // pointer to stored raw DIAN response
   issuedAt              DateTime?
