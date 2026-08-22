@@ -1,11 +1,13 @@
 import type { DianKitConfig, InvoiceInput, Party, SendOptions } from "@dian-kit/sdk-node";
 
 import { prisma } from "../../infrastructure/prisma.js";
+import type { CertificateSecretStore } from "../../providers/certificates/CertificateSecretStore.js";
 import { LocalFileCertificateSecretStore } from "../../providers/certificates/LocalFileCertificateSecretStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
+import type { DianProvider } from "../../providers/dian/DianProvider.js";
 import { env } from "../../shared/env.js";
 
-const secretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
+const defaultSecretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
 
 export interface TestInvoiceParams {
   companyId: string;
@@ -14,13 +16,27 @@ export interface TestInvoiceParams {
   send?: SendOptions;
 }
 
+export interface TestInvoiceDeps {
+  /** @defaultValue a LocalFileCertificateSecretStore over CERTIFICATES_DIR */
+  secretStore?: CertificateSecretStore;
+  /** @defaultValue `(config) => new DianKitProvider(config)` — override in tests to avoid touching dian-kit/DIAN at all. */
+  createProvider?: (config: DianKitConfig) => DianProvider;
+}
+
 /**
  * Dev-only pipeline: load a company's DIAN config, numbering, and test
  * certificate from ITCycle's own database, then delegate everything
- * document-related to {@link DianKitProvider}. See docs/dian/sandbox-tests.md
- * for how to provision the company this expects.
+ * document-related to a {@link DianProvider} (real DianKitProvider by
+ * default). See docs/dian/sandbox-tests.md for how to provision the company
+ * this expects.
  */
-export async function createTestInvoice(params: TestInvoiceParams) {
+export async function createTestInvoice(
+  params: TestInvoiceParams,
+  deps: TestInvoiceDeps = {},
+) {
+  const secretStore = deps.secretStore ?? defaultSecretStore;
+  const createProvider = deps.createProvider ?? ((config: DianKitConfig) => new DianKitProvider(config));
+
   const existing = await prisma.invoice.findUnique({
     where: {
       companyId_internalReference: {
@@ -85,7 +101,7 @@ export async function createTestInvoice(params: TestInvoiceParams) {
       },
     };
 
-    const provider = new DianKitProvider(config);
+    const provider = createProvider(config);
     const invoiceInput = toInvoiceInput(params.invoice);
 
     const document = await provider.createInvoice(invoiceInput);
