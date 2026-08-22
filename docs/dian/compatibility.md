@@ -6,7 +6,7 @@ Registro de versiones y compatibilidad entre DIAN, `dian-kit` (motor) e ITCycle 
 
 | Componente | Versión / Referencia |
 |---|---|
-| `dian-kit` (submódulo) | commit `15573c9c7190e4ae492f02158501d16bbd283ce7` (rama `main` del upstream, 2026-05-25) |
+| `dian-engine` (submódulo dian-kit) | commit `15573c9c7190e4ae492f02158501d16bbd283ce7` (rama `main` del upstream, 2026-05-25) |
 | `@dian-kit/core` | 1.0.1 |
 | `@dian-kit/sdk-node` | 1.0.1 |
 | ITCycle DIAN API | sin versionar todavía (pre-alpha) |
@@ -26,9 +26,12 @@ eso no ha sido reproducido todavía dentro de este repositorio.
 
 ## Cambios relevantes
 
-- 2026-08-21: se incorpora `dian-kit` como submódulo de git en `./dian-kit`, pinneado al commit
+- 2026-08-21: se incorpora `dian-kit` como submódulo de git en `./dian-engine`, pinneado al commit
   `15573c9c`. `pnpm install`, `pnpm build` y `pnpm test` (215 tests) verificados localmente sin
   modificar el código fuente del motor.
+- 2026-08-22: se renombra la carpeta del submódulo de `dian-kit/` a `dian-engine/` (solo la ruta
+  local; el proyecto upstream y los paquetes npm `@dian-kit/core`/`@dian-kit/sdk-node` no cambian
+  de nombre) para que no se confunda con el nombre del producto ITCycle.
 
 ## Issues conocidos
 

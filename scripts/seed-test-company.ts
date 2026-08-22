@@ -7,7 +7,7 @@
  *
  * 1. Real DIAN Sandbox registration (default): reuses the exact same
  *    DIAN_TEST_* environment variable names as dian-kit's own integration
- *    test suite (dian-kit/packages/core/tests/integration/dian-sandbox.test.ts)
+ *    test suite (dian-engine/packages/core/tests/integration/dian-sandbox.test.ts)
  *    — see docs/dian/sandbox-tests.md for the full list.
  *
  *      DIAN_TEST_NIT=... DIAN_TEST_NIT_DV=... ... pnpm db:seed:test-company

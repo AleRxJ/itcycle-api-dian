@@ -4,7 +4,7 @@ import type { DianProvider } from "./DianProvider.js";
 
 /**
  * {@link DianProvider} implementation backed by the vendored `dian-kit`
- * engine (`./dian-kit`, git submodule). Purely delegates to a `DianKit`
+ * engine (`./dian-engine`, git submodule). Purely delegates to a `DianKit`
  * instance — no DIAN logic (UBL, XAdES, CUFE/CUDE, SOAP) belongs here.
  */
 export class DianKitProvider implements DianProvider {

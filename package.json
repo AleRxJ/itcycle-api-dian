@@ -2,7 +2,7 @@
   "name": "itcycle-api-dian",
   "version": "0.1.0",
   "private": true,
-  "description": "Infraestructura de facturacion electronica DIAN para Ohnix, construida sobre el motor dian-kit.",
+  "description": "Infraestructura de facturacion electronica DIAN para Ohnix, construida sobre el motor dian-engine (vendored de dian-kit).",
   "type": "module",
   "license": "UNLICENSED",
   "engines": {
@@ -23,8 +23,8 @@
     "db:seed:test-company": "tsx scripts/seed-test-company.ts"
   },
   "dependencies": {
-    "@dian-kit/core": "link:./dian-kit/packages/core",
-    "@dian-kit/sdk-node": "link:./dian-kit/packages/sdk-node",
+    "@dian-kit/core": "link:./dian-engine/packages/core",
+    "@dian-kit/sdk-node": "link:./dian-engine/packages/sdk-node",
     "@prisma/client": "^6.2.1",
     "dotenv": "^16.4.5",
     "fastify": "^5.2.0",

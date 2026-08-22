@@ -6,7 +6,7 @@ Registro de ejecuciones contra el ambiente de Habilitación (Sandbox) de la DIAN
 ## Cómo ejecutar (referencia, `dian-kit`)
 
 Las pruebas de integración de `dian-kit` contra el Sandbox real están en
-[`dian-kit/packages/core/tests/integration/dian-sandbox.test.ts`](../../dian-kit/packages/core/tests/integration/dian-sandbox.test.ts).
+[`dian-engine/packages/core/tests/integration/dian-sandbox.test.ts`](../../dian-engine/packages/core/tests/integration/dian-sandbox.test.ts).
 Están deshabilitadas por defecto y requieren las siguientes variables de entorno (empresa de
 prueba habilitada ante la DIAN):
 
@@ -20,7 +20,7 @@ prueba habilitada ante la DIAN):
 - `DIAN_TEST_AUTH_NUMBER`, `DIAN_TEST_PREFIX`, `DIAN_TEST_START_NUMBER`, `DIAN_TEST_END_NUMBER`
 - `DIAN_TEST_PROVIDER_NIT`
 
-Comando: `pnpm --filter @dian-kit/core test:integration` (desde `dian-kit/`).
+Comando: `pnpm --filter @dian-kit/core test:integration` (desde `dian-engine/`).
 
 **No usar credenciales ni certificados de clientes reales de Ohnix aquí.** Únicamente una empresa
 de prueba dedicada a habilitación.
@@ -53,7 +53,7 @@ curl -X POST http://localhost:3000/api/v1/dian/test-invoice \
 ```
 
 `invoice` sigue la forma de `InvoiceInput` de `@dian-kit/sdk-node` (ver
-[`dian-kit/examples/basic-invoice.ts`](../../dian-kit/examples/basic-invoice.ts)), con
+[`dian-engine/examples/basic-invoice.ts`](../../dian-engine/examples/basic-invoice.ts)), con
 `issueDate`/`issueTime` como strings ISO. La petición es idempotente en
 `(companyId, internalReference)`.
 

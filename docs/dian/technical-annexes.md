@@ -11,11 +11,11 @@ puedan afectar a `dian-kit` o a ITCycle. No depender solo de GitHub para enterar
 - Política de firma electrónica (XAdES-EPES), v2:
   https://facturaelectronica.dian.gov.co/politicadefirma/v2/politicadefirmav2.pdf
 
-## Referencia interna (dentro de `dian-kit`, no modificar)
+## Referencia interna (dentro de `dian-engine`, no modificar)
 
-- [`dian-kit/docs/technical-reference/dian-xml-specifications.md`](../../dian-kit/docs/technical-reference/dian-xml-specifications.md)
-- [`dian-kit/docs/errores-dian.md`](../../dian-kit/docs/errores-dian.md) — catálogo de errores DIAN comunes y solución
-- [`dian-kit/docs/guia-certificado.md`](../../dian-kit/docs/guia-certificado.md) — cómo obtener un certificado .p12
+- [`dian-engine/docs/technical-reference/dian-xml-specifications.md`](../../dian-engine/docs/technical-reference/dian-xml-specifications.md)
+- [`dian-engine/docs/errores-dian.md`](../../dian-engine/docs/errores-dian.md) — catálogo de errores DIAN comunes y solución
+- [`dian-engine/docs/guia-certificado.md`](../../dian-engine/docs/guia-certificado.md) — cómo obtener un certificado .p12
 
 ## Endpoints SOAP (`@dian-kit/core`)
 
@@ -31,7 +31,7 @@ Cuando la DIAN publique cambios en anexos técnicos, catálogos o validaciones:
 1. Revisar el changelog/commits de `sergioarojasm98/dian-kit` en GitHub.
 2. Revisar comunicados oficiales de la DIAN (enlaces arriba).
 3. Comparar contra la versión pinneada en [`compatibility.md`](./compatibility.md).
-4. Si aplica una actualización del submódulo: correr `pnpm test` dentro de `dian-kit/`, correr
+4. Si aplica una actualización del submódulo: correr `pnpm test` dentro de `dian-engine/`, correr
    pruebas de Sandbox, revisar compatibilidad con `src/` de ITCycle, e incorporar deliberadamente
    (nunca actualización automática). Ver [`changelog.md`](./changelog.md) para el registro de
    cada incorporación.
