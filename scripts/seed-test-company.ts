@@ -92,6 +92,72 @@ function writeTempP12(p12Buffer: Buffer): string {
   return path;
 }
 
+/**
+ * Seeds an additional NumberingResolution for credit notes (documentType
+ * "91") or debit notes ("92") — DIAN requires each document type to have its
+ * own authorized numbering range (see prisma/schema.prisma NumberingResolution
+ * docs). In SIMULATE mode a range is always fabricated (labeled clearly, same
+ * as the invoice range). Against a real Sandbox company this is only seeded
+ * when the matching DIAN_TEST_{label}_* env vars are all present — nobody
+ * should fabricate a real DIAN-authorized numbering range.
+ */
+async function seedNoteNumbering(
+  companyId: string,
+  documentType: "91" | "92",
+  label: "CN" | "DN",
+  certNotAfter: Date,
+): Promise<void> {
+  const prefixVar = `DIAN_TEST_${label}_PREFIX`;
+  const authVar = `DIAN_TEST_${label}_AUTH_NUMBER`;
+  const startVar = `DIAN_TEST_${label}_START_NUMBER`;
+  const endVar = `DIAN_TEST_${label}_END_NUMBER`;
+
+  let prefix: string;
+  let resolutionNumber: string;
+  let startNumber: number;
+  let endNumber: number;
+
+  if (SIMULATE) {
+    // DIAN numbering prefixes are capped at 4 characters (see dian-kit's
+    // DianKitConfig schema) — "SIMU" is already 4, so notes get their own
+    // short fabricated prefix instead of appending to it.
+    prefix = label === "CN" ? "SINC" : "SIND";
+    resolutionNumber = "00000000000";
+    startNumber = 1;
+    endNumber = 999999;
+  } else {
+    const vars = [prefixVar, authVar, startVar, endVar] as const;
+    const missing = vars.filter((key) => !process.env[key]);
+    if (missing.length > 0) {
+      console.log(
+        `Skipping documentType=${documentType} numbering (no ${label} range provided): ` +
+          `set ${vars.join(", ")} to seed one.`,
+      );
+      return;
+    }
+    prefix = process.env[prefixVar] as string;
+    resolutionNumber = process.env[authVar] as string;
+    startNumber = Number(process.env[startVar]);
+    endNumber = Number(process.env[endVar]);
+  }
+
+  await prisma.numberingResolution.upsert({
+    where: { companyId_prefix: { companyId, prefix } },
+    create: {
+      companyId,
+      documentType,
+      prefix,
+      resolutionNumber,
+      startNumber,
+      endNumber,
+      currentNumber: startNumber,
+      startDate: new Date(),
+      endDate: certNotAfter,
+    },
+    update: { resolutionNumber, startNumber, endNumber },
+  });
+}
+
 async function main() {
   const testEnv = SIMULATE ? buildSimulatedEnv() : readRequiredEnv();
 
@@ -160,6 +226,7 @@ async function main() {
     where: { companyId_prefix: { companyId: company.id, prefix: testEnv.DIAN_TEST_PREFIX } },
     create: {
       companyId: company.id,
+      documentType: "01",
       prefix: testEnv.DIAN_TEST_PREFIX,
       resolutionNumber: testEnv.DIAN_TEST_AUTH_NUMBER,
       startNumber: Number(testEnv.DIAN_TEST_START_NUMBER),
@@ -174,6 +241,9 @@ async function main() {
       endNumber: Number(testEnv.DIAN_TEST_END_NUMBER),
     },
   });
+
+  await seedNoteNumbering(company.id, "91", "CN", certData.notAfter);
+  await seedNoteNumbering(company.id, "92", "DN", certData.notAfter);
 
   const secretReference = SIMULATE ? `${testEnv.DIAN_TEST_NIT}-simulated` : `${testEnv.DIAN_TEST_NIT}-sandbox-test`;
   const secretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
@@ -205,11 +275,17 @@ async function main() {
         "See docs/dian/simulation.md.",
     );
   }
-  console.log("Try it:");
+  console.log("Try it (dev-only test-invoice, manual document id):");
   console.log(
     `curl -X POST http://localhost:${env.port}/api/v1/dian/test-invoice ` +
       `-H "x-api-key: $DEV_API_KEY" -H "Content-Type: application/json" ` +
       `-d '{"companyId":"${company.id}","internalReference":"test-1","invoice":{...},"send":{"method":"SendTestSetAsync","testSetId":"${testEnv.DIAN_TEST_SET_ID ?? process.env.DIAN_TEST_SET_ID ?? ""}"}}'`,
+  );
+  console.log("Try it (production endpoint, server-assigned document id):");
+  console.log(
+    `curl -X POST http://localhost:${env.port}/api/v1/documents/invoices ` +
+      `-H "x-api-key: $DEV_API_KEY" -H "Content-Type: application/json" ` +
+      `-d '{"companyId":"${company.id}","internalReference":"prod-test-1","invoice":{...},"send":{"method":"SendTestSetAsync","testSetId":"${testEnv.DIAN_TEST_SET_ID ?? process.env.DIAN_TEST_SET_ID ?? ""}"}}'`,
   );
 }
 

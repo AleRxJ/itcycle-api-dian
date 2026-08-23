@@ -63,6 +63,46 @@ correctamente, `createInvoice` firma sin error, y `send()` efectivamente llega a
 la DIAN (falla la autenticación por ser credenciales falsas, como se esperaba). Falta repetirlo con
 una empresa de prueba real habilitada ante la DIAN para completar el criterio de éxito de abajo.
 
+## Endpoints de producción (`src/modules/documents/`)
+
+Desde 2026-08-23 existen endpoints de producción para factura, nota crédito y nota débito, además del
+endpoint dev-only de arriba. Diferencias clave frente a `/api/v1/dian/test-invoice`:
+
+- El número de documento **no** lo elige quien llama a la API: se reclama atómicamente del
+  `currentNumber` de la `NumberingResolution` `ACTIVE` de la empresa para ese tipo de documento
+  (`documentType`: `"01"` factura, `"91"` nota crédito, `"92"` nota débito). Cualquier `id` en el
+  cuerpo de la petición se ignora.
+- Nota crédito y nota débito reciben `invoiceId` (el id interno de la `Invoice` en la base de ITCycle,
+  no un `billingReference` crudo) — el servicio exige que esa factura esté `ACCEPTED` y arma
+  `billingReference`/`discrepancyResponse.referenceId` a partir de ella.
+- Siguen protegidos por el mismo `requireDevApiKey` que el endpoint dev-only — la autenticación real
+  multi-tenant (API key por empresa) es trabajo aparte, todavía no implementado.
+
+`pnpm db:seed:test-company` ahora también siembra (o, en modo `SIMULATE=true`, fabrica) numeración
+`documentType="91"`/`"92"` para poder probar notas crédito/débito contra la misma empresa de prueba;
+para una empresa real, solo lo hace si se definen `DIAN_TEST_CN_PREFIX`/`_AUTH_NUMBER`/`_START_NUMBER`/
+`_END_NUMBER` (y el equivalente `DIAN_TEST_DN_*` para nota débito).
+
+```bash
+# Factura
+curl -X POST http://localhost:3000/api/v1/documents/invoices \
+  -H "x-api-key: $DEV_API_KEY" -H "Content-Type: application/json" \
+  -d '{"companyId":"<id>","internalReference":"...","invoice":{...},"send":{"method":"SendTestSetAsync","testSetId":"..."}}'
+
+# Nota crédito, referenciando la factura ya ACCEPTED de arriba
+curl -X POST http://localhost:3000/api/v1/documents/credit-notes \
+  -H "x-api-key: $DEV_API_KEY" -H "Content-Type: application/json" \
+  -d '{"companyId":"<id>","internalReference":"...","invoiceId":"<invoice id devuelto arriba>","document":{...},"discrepancyResponse":{"responseCode":"2","description":"..."},"send":{"method":"SendTestSetAsync","testSetId":"..."}}'
+
+# Estado de un documento ya emitido
+curl "http://localhost:3000/api/v1/documents/invoices/<id>?companyId=<id>" -H "x-api-key: $DEV_API_KEY"
+```
+
+Cobertura de pruebas: `src/modules/documents/*.service.test.ts` (mismo patrón que
+`test-invoice.service.test.ts` — provider/secretStore falsos contra la base de datos real de
+desarrollo), incluyendo el caso de rechazo al referenciar una factura no `ACCEPTED` y la verificación
+de que la numeración nunca se repite ante una repetición idempotente.
+
 ## Bitácora de ejecuciones
 
 | Fecha | Ejecutado por | Empresa de prueba | Documento | CUFE/CUDE | trackId | Resultado | Notas |

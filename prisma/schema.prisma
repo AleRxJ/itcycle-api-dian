@@ -53,8 +53,34 @@ model Company {
   numberingResolutions NumberingResolution[]
   certificates         Certificate[]
   invoices             Invoice[]
+  creditNotes          CreditNote[]
+  debitNotes           DebitNote[]
+  apiKeys              ApiKey[]
 
   @@unique([nit, dv])
+}
+
+/// A production API key bound to exactly one Company. `keyHash` is the only
+/// thing persisted (SHA-256 of the raw key — high-entropy random tokens
+/// don't need a slow password hash); the raw key itself is shown to the
+/// caller of scripts/create-api-key.ts exactly once and never stored.
+/// `keyPrefix` (first 8 chars of the raw key) exists only so a key can be
+/// identified/logged without ever reconstructing or revealing the rest.
+model ApiKey {
+  id         String       @id @default(cuid())
+  companyId  String
+  keyHash    String       @unique
+  keyPrefix  String
+  label      String
+  status     RecordStatus @default(ACTIVE)
+  lastUsedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 /// DIAN registration details for a company's software (habilitacion).
@@ -83,9 +109,15 @@ model DianConfiguration {
 /// A DIAN numbering authorization (resolucion de numeracion) assigned to a
 /// company. A company may hold multiple resolutions over time (renewals,
 /// different prefixes); `currentNumber` tracks the next number to issue.
+///
+/// DIAN requires a separate authorized numbering range per document type
+/// (factura != nota credito != nota debito) — `documentType` (DIAN document
+/// type code: "01" factura, "91" nota credito, "92" nota debito) is what
+/// `claimNextNumber` filters on so each document type advances its own range.
 model NumberingResolution {
   id               String       @id @default(cuid())
   companyId        String
+  documentType     String       @default("01")
   prefix           String
   resolutionNumber String
   startNumber      Int
@@ -98,11 +130,14 @@ model NumberingResolution {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoices Invoice[]
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices    Invoice[]
+  creditNotes CreditNote[]
+  debitNotes  DebitNote[]
 
   @@unique([companyId, prefix])
   @@index([companyId])
+  @@index([companyId, documentType, status])
 }
 
 /// Metadata about a digital certificate used to sign a company's documents.
@@ -120,15 +155,15 @@ model Certificate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoices Invoice[]
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices    Invoice[]
+  creditNotes CreditNote[]
+  debitNotes  DebitNote[]
 
   @@index([companyId])
 }
 
-/// An electronic invoice (Factura de Venta) issued by a company. Notes,
-/// debit notes, and equivalent documents will get their own models later
-/// (see docs — not implemented yet).
+/// An electronic invoice (Factura de Venta) issued by a company.
 model Invoice {
   id                  String        @id @default(cuid())
   companyId           String
@@ -158,7 +193,88 @@ model Invoice {
   company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
   numbering   NumberingResolution? @relation(fields: [numberingId], references: [id])
   certificate Certificate?         @relation(fields: [certificateId], references: [id])
+  creditNotes CreditNote[]
+  debitNotes  DebitNote[]
 
   @@unique([companyId, internalReference])
   @@index([companyId, status])
+}
+
+/// A credit note (Nota Credito, DIAN type 91) that partially or fully
+/// reverses a previously issued, ACCEPTED Invoice. Always references that
+/// Invoice — the billingReference/discrepancyResponse.referenceId sent to
+/// dian-kit are derived from it, never taken raw from the caller.
+model CreditNote {
+  id                      String        @id @default(cuid())
+  companyId               String
+  invoiceId               String
+  numberingId             String?
+  certificateId           String?
+  internalReference       String // idempotency key
+  noteNumber              String? // full number, e.g. "NC0000001"
+  prefix                  String?
+  cufe                    String?
+  discrepancyResponseCode String // DIAN correction code, e.g. "2" = anulacion
+  discrepancyDescription  String
+  status                  InvoiceStatus @default(PENDING)
+  /// See Invoice.simulated — same meaning, same caveat (docs/dian/simulation.md).
+  simulated               Boolean       @default(false)
+  xmlReference            String?
+  dianResponseReference   String?
+  issuedAt                DateTime?
+  sentAt                  DateTime?
+  acceptedAt              DateTime?
+  rejectedAt              DateTime?
+  errorCode               String?
+  errorMessage            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoice     Invoice              @relation(fields: [invoiceId], references: [id])
+  numbering   NumberingResolution? @relation(fields: [numberingId], references: [id])
+  certificate Certificate?         @relation(fields: [certificateId], references: [id])
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
+  @@index([invoiceId])
+}
+
+/// A debit note (Nota Debito, DIAN type 92) that increases the amount owed
+/// on a previously issued, ACCEPTED Invoice. Same shape/rules as CreditNote.
+model DebitNote {
+  id                      String        @id @default(cuid())
+  companyId               String
+  invoiceId               String
+  numberingId             String?
+  certificateId           String?
+  internalReference       String
+  noteNumber              String?
+  prefix                  String?
+  cufe                    String?
+  discrepancyResponseCode String // DIAN correction code, e.g. "1" = intereses
+  discrepancyDescription  String
+  status                  InvoiceStatus @default(PENDING)
+  simulated               Boolean       @default(false)
+  xmlReference            String?
+  dianResponseReference   String?
+  issuedAt                DateTime?
+  sentAt                  DateTime?
+  acceptedAt              DateTime?
+  rejectedAt              DateTime?
+  errorCode               String?
+  errorMessage            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoice     Invoice              @relation(fields: [invoiceId], references: [id])
+  numbering   NumberingResolution? @relation(fields: [numberingId], references: [id])
+  certificate Certificate?         @relation(fields: [certificateId], references: [id])
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
+  @@index([invoiceId])
 }
