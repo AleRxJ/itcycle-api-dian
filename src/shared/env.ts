@@ -3,10 +3,27 @@ import "dotenv/config";
 export const env = {
   port: Number(process.env.PORT ?? 3000),
   nodeEnv: process.env.NODE_ENV ?? "development",
-  /** Local directory for LocalFileCertificateSecretStore. Dev only — see docs/certificates/. */
+  /** Local directory for the certificate secret store (encrypted or plaintext, see certificateStore.ts). */
   certificatesDir: process.env.CERTIFICATES_DIR ?? "./certs",
+  /** Local directory for LocalFileDocumentXmlStore (signed document XML — not a secret, but never in git). */
+  documentsDir: process.env.DOCUMENTS_DIR ?? "./documents",
   /** Shared secret protecting the dev-only /api/v1/dian/* routes. */
   devApiKey: process.env.DEV_API_KEY,
+  /**
+   * Shared secret protecting /api/v1/admin/* (tenant provisioning: create
+   * Company, set DianConfiguration, register NumberingResolution, upload
+   * Certificate, issue ApiKey). Deliberately separate from DEV_API_KEY: this
+   * is meant to be called only by Ohnix's own backend, never a customer or
+   * a dev-only manual test — see src/shared/adminAuth.ts.
+   */
+  adminApiKey: process.env.ADMIN_API_KEY,
+  /**
+   * 32-byte key (base64url) encrypting certificates at rest via
+   * EncryptedFileCertificateSecretStore. Unset falls back to the plaintext
+   * LocalFileCertificateSecretStore — fine for local dev, never for a real
+   * deployment. See src/shared/certificateStore.ts.
+   */
+  certificateEncryptionKey: process.env.CERTIFICATE_ENCRYPTION_KEY,
   /**
    * When true, test-invoice uses SimulatedDianProvider instead of the real
    * DianKitProvider: dian-kit still builds/signs the real document, but the
@@ -14,4 +31,8 @@ export const env = {
    * NEVER a substitute for a real DIAN Sandbox test — dev/demo only.
    */
   dianSimulationMode: process.env.DIAN_SIMULATION_MODE === "true",
+  /** Master on/off switch for the contingency-retry cron job (src/jobs/contingencyRetry.job.ts). Default on. */
+  startScheduler: process.env.START_SCHEDULER !== "false",
+  /** Cron expression for how often CONTINGENCY documents are automatically retried. Default: every 10 minutes. */
+  contingencyRetryCron: process.env.CONTINGENCY_RETRY_CRON ?? "*/10 * * * *",
 };

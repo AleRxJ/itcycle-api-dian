@@ -2,14 +2,15 @@ import type { DianKitConfig, InvoiceInput, SendOptions } from "@dian-kit/sdk-nod
 
 import { prisma } from "../../infrastructure/prisma.js";
 import type { CertificateSecretStore } from "../../providers/certificates/CertificateSecretStore.js";
-import { LocalFileCertificateSecretStore } from "../../providers/certificates/LocalFileCertificateSecretStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
+import type { DocumentXmlStore } from "../../providers/documents/DocumentXmlStore.js";
+import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { env } from "../../shared/env.js";
+import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
-
-const defaultSecretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
+import { reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
@@ -23,10 +24,12 @@ export interface CreateInvoiceParams {
 }
 
 export interface DocumentServiceDeps {
-  /** @defaultValue a LocalFileCertificateSecretStore over CERTIFICATES_DIR */
+  /** @defaultValue a LocalFileCertificateSecretStore over CERTIFICATES_DIR, or EncryptedFileCertificateSecretStore when CERTIFICATE_ENCRYPTION_KEY is set */
   secretStore?: CertificateSecretStore;
   /** @defaultValue DianKitProvider, or SimulatedDianProvider when DIAN_SIMULATION_MODE=true */
   createProvider?: (config: DianKitConfig) => DianProvider;
+  /** @defaultValue a LocalFileDocumentXmlStore over DOCUMENTS_DIR */
+  xmlStore?: DocumentXmlStore;
 }
 
 /**
@@ -38,8 +41,9 @@ export interface DocumentServiceDeps {
  * request's `invoice` object is ignored.
  */
 export async function createInvoice(params: CreateInvoiceParams, deps: DocumentServiceDeps = {}) {
-  const secretStore = deps.secretStore ?? defaultSecretStore;
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.invoice.findUnique({
@@ -76,15 +80,45 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
     const provider = createProvider(config);
     const invoiceInput = toInvoiceInput(params.invoice, documentId);
 
+    // Building/signing is entirely local (dian-kit) — a failure here means
+    // there is no document to deliver to the customer, so it stays ERROR
+    // (below, in the outer catch). Only *sending* to DIAN can turn into a
+    // contingencia — see documentSend.service.ts.
     const document = await provider.createInvoice(invoiceInput);
-    const response = await provider.send(document, params.send);
 
+    // Persisted before attempting send(): if DIAN is unreachable, this is
+    // exactly the XML that must be re-sent later via retrySend — dian-kit's
+    // XAdES-EPES signature embeds a timestamp, so re-signing would produce a
+    // different document, not a retry of the same one.
+    const xmlReference = invoiceRecord.id;
+    await xmlStore.save(xmlReference, document.signedXml);
+
+    const outcome = await sendWithContingencyHandling(provider, document, params.send);
+
+    if (outcome.kind === "contingency") {
+      return await prisma.invoice.update({
+        where: { id: invoiceRecord.id },
+        data: {
+          invoiceNumber: document.documentNumber,
+          prefix: numbering.prefix,
+          cufe: document.uuid,
+          xmlReference,
+          status: "CONTINGENCY",
+          simulated,
+          issuedAt: new Date(),
+          errorMessage: outcome.error.message,
+        },
+      });
+    }
+
+    const { response } = outcome;
     return await prisma.invoice.update({
       where: { id: invoiceRecord.id },
       data: {
         invoiceNumber: document.documentNumber,
         prefix: numbering.prefix,
         cufe: document.uuid,
+        xmlReference,
         status: response.isValid ? "ACCEPTED" : "REJECTED",
         simulated,
         issuedAt: new Date(),
@@ -104,6 +138,64 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
     });
     throw error;
   }
+}
+
+/**
+ * Retries sending a CONTINGENCY invoice to DIAN — reuses the exact
+ * previously-signed XML (never regenerated) and the same document number
+ * and CUFE the customer already received. Stays CONTINGENCY if DIAN is
+ * still unreachable; transitions to ACCEPTED/REJECTED once DIAN responds.
+ * A REJECTED reached this way does not retroactively invalidate the
+ * document already delivered to the customer (a support/process concern,
+ * not something this status machine needs to model separately).
+ */
+export async function retryInvoiceSend(
+  companyId: string,
+  id: string,
+  send?: SendOptions,
+  deps: DocumentServiceDeps = {},
+) {
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
+  const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const simulated = !deps.createProvider && env.dianSimulationMode;
+
+  const invoice = await prisma.invoice.findFirst({ where: { id, companyId } });
+  if (!invoice) {
+    throw new Error(`Invoice ${id} not found for company ${companyId}`);
+  }
+  if (invoice.status !== "CONTINGENCY") {
+    throw new Error(`Invoice ${id} is not in CONTINGENCY (status=${invoice.status}) — nothing to retry.`);
+  }
+  if (!invoice.xmlReference || !invoice.invoiceNumber || !invoice.cufe) {
+    throw new Error(`Invoice ${id} is CONTINGENCY but missing xmlReference/invoiceNumber/cufe — cannot resend.`);
+  }
+
+  const { config } = await loadDianConfig({ companyId, documentType: "01" }, secretStore);
+  const provider = createProvider(config);
+  const signedXml = await xmlStore.get(invoice.xmlReference);
+  const document = reconstructDocumentForResend(signedXml, invoice.invoiceNumber, invoice.cufe);
+
+  const outcome = await sendWithContingencyHandling(provider, document, send);
+
+  if (outcome.kind === "contingency") {
+    return await prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { errorMessage: outcome.error.message },
+    });
+  }
+
+  const { response } = outcome;
+  return await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: {
+      status: response.isValid ? "ACCEPTED" : "REJECTED",
+      simulated,
+      sentAt: new Date(),
+      acceptedAt: response.isValid ? new Date() : null,
+      errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
+    },
+  });
 }
 
 export async function getInvoice(companyId: string, id: string) {

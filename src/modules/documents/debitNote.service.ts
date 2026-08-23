@@ -1,15 +1,15 @@
 import type { DebitNoteInput, DianKitConfig, SendOptions } from "@dian-kit/sdk-node";
 
 import { prisma } from "../../infrastructure/prisma.js";
-import { LocalFileCertificateSecretStore } from "../../providers/certificates/LocalFileCertificateSecretStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
+import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { env } from "../../shared/env.js";
+import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
+import { reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
-
-const defaultSecretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
@@ -30,8 +30,9 @@ export interface CreateDebitNoteParams {
  * (not a raw billingReference) is the input, and why ACCEPTED is required.
  */
 export async function createDebitNote(params: CreateDebitNoteParams, deps: DocumentServiceDeps = {}) {
-  const secretStore = deps.secretStore ?? defaultSecretStore;
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.debitNote.findUnique({
@@ -98,14 +99,36 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
     } as DebitNoteInput;
 
     const document = await provider.createDebitNote(input);
-    const response = await provider.send(document, params.send);
 
+    const xmlReference = debitNoteRecord.id;
+    await xmlStore.save(xmlReference, document.signedXml);
+
+    const outcome = await sendWithContingencyHandling(provider, document, params.send);
+
+    if (outcome.kind === "contingency") {
+      return await prisma.debitNote.update({
+        where: { id: debitNoteRecord.id },
+        data: {
+          noteNumber: document.documentNumber,
+          prefix: numbering.prefix,
+          cufe: document.uuid,
+          xmlReference,
+          status: "CONTINGENCY",
+          simulated,
+          issuedAt: new Date(),
+          errorMessage: outcome.error.message,
+        },
+      });
+    }
+
+    const { response } = outcome;
     return await prisma.debitNote.update({
       where: { id: debitNoteRecord.id },
       data: {
         noteNumber: document.documentNumber,
         prefix: numbering.prefix,
         cufe: document.uuid,
+        xmlReference,
         status: response.isValid ? "ACCEPTED" : "REJECTED",
         simulated,
         issuedAt: new Date(),
@@ -125,6 +148,53 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
     });
     throw error;
   }
+}
+
+/** Retries sending a CONTINGENCY debit note — see retryInvoiceSend in invoice.service.ts for the full rationale. */
+export async function retryDebitNoteSend(
+  companyId: string,
+  id: string,
+  send?: SendOptions,
+  deps: DocumentServiceDeps = {},
+) {
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
+  const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const simulated = !deps.createProvider && env.dianSimulationMode;
+
+  const debitNote = await prisma.debitNote.findFirst({ where: { id, companyId } });
+  if (!debitNote) {
+    throw new Error(`Debit note ${id} not found for company ${companyId}`);
+  }
+  if (debitNote.status !== "CONTINGENCY") {
+    throw new Error(`Debit note ${id} is not in CONTINGENCY (status=${debitNote.status}) — nothing to retry.`);
+  }
+  if (!debitNote.xmlReference || !debitNote.noteNumber || !debitNote.cufe) {
+    throw new Error(`Debit note ${id} is CONTINGENCY but missing xmlReference/noteNumber/cufe — cannot resend.`);
+  }
+
+  const { config } = await loadDianConfig({ companyId, documentType: "92" }, secretStore);
+  const provider = createProvider(config);
+  const signedXml = await xmlStore.get(debitNote.xmlReference);
+  const document = reconstructDocumentForResend(signedXml, debitNote.noteNumber, debitNote.cufe);
+
+  const outcome = await sendWithContingencyHandling(provider, document, send);
+
+  if (outcome.kind === "contingency") {
+    return await prisma.debitNote.update({ where: { id: debitNote.id }, data: { errorMessage: outcome.error.message } });
+  }
+
+  const { response } = outcome;
+  return await prisma.debitNote.update({
+    where: { id: debitNote.id },
+    data: {
+      status: response.isValid ? "ACCEPTED" : "REJECTED",
+      simulated,
+      sentAt: new Date(),
+      acceptedAt: response.isValid ? new Date() : null,
+      errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
+    },
+  });
 }
 
 export async function getDebitNote(companyId: string, id: string) {

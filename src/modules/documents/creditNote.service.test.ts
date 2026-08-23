@@ -1,9 +1,28 @@
+import { DianTransportError } from "@dian-kit/sdk-node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "../../infrastructure/prisma.js";
 import type { CertificateSecretStore } from "../../providers/certificates/CertificateSecretStore.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
-import { createCreditNote } from "./creditNote.service.js";
+import type { DocumentXmlStore } from "../../providers/documents/DocumentXmlStore.js";
+import { createCreditNote, retryCreditNoteSend } from "./creditNote.service.js";
+
+function fakeXmlStore(): DocumentXmlStore {
+  const files = new Map<string, string>();
+  return {
+    save: vi.fn(async (ref: string, xml: string) => {
+      files.set(ref, xml);
+    }),
+    get: vi.fn(async (ref: string) => {
+      const xml = files.get(ref);
+      if (xml === undefined) throw new Error(`no xml stored for ${ref}`);
+      return xml;
+    }),
+    delete: vi.fn(async (ref: string) => {
+      files.delete(ref);
+    }),
+  };
+}
 
 const TEST_NIT = "999000003";
 const TEST_DV = "1";
@@ -160,7 +179,11 @@ describe("createCreditNote", () => {
         document: noteDocument(),
         discrepancyResponse: { responseCode: "2", description: "Anulacion por error en datos del cliente" },
       },
-      { secretStore: fakeSecretStore, createProvider: () => fakeProvider({ createCreditNote: createCreditNoteMock, send }) },
+      {
+        secretStore: fakeSecretStore,
+        xmlStore: fakeXmlStore(),
+        createProvider: () => fakeProvider({ createCreditNote: createCreditNoteMock, send }),
+      },
     );
 
     expect(result.status).toBe("ACCEPTED");
@@ -220,6 +243,7 @@ describe("createCreditNote", () => {
       .mockResolvedValue({ isValid: true, statusCode: "00", statusDescription: "ok", errors: [], rawResponse: "" });
     const deps = {
       secretStore: fakeSecretStore,
+      xmlStore: fakeXmlStore(),
       createProvider: () => fakeProvider({ createCreditNote: createCreditNoteMock, send }),
     };
     const params = {
@@ -239,5 +263,41 @@ describe("createCreditNote", () => {
     expect(second.id).toBe(first.id);
     expect(createCreditNoteMock).toHaveBeenCalledTimes(1);
     expect(numberingAfterSecond.currentNumber).toBe(numberingAfterFirst.currentNumber);
+  });
+
+  it("falls back to CONTINGENCY when send() fails because DIAN is unreachable, and retry-send later accepts it", async () => {
+    const createCreditNoteMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed-nc-contingency/>", uuid: "cufe-nc-5", documentNumber: "TSTNC5" });
+    const failingSend = vi.fn().mockRejectedValue(new DianTransportError("DIAN unreachable"));
+    const xmlStore = fakeXmlStore();
+
+    const contingencyNote = await createCreditNote(
+      {
+        companyId,
+        internalReference: "nc-ref-5",
+        invoiceId: acceptedInvoiceId,
+        document: noteDocument(),
+        discrepancyResponse: { responseCode: "2", description: "test" },
+      },
+      { secretStore: fakeSecretStore, xmlStore, createProvider: () => fakeProvider({ createCreditNote: createCreditNoteMock, send: failingSend }) },
+    );
+
+    expect(contingencyNote.status).toBe("CONTINGENCY");
+    expect(contingencyNote.noteNumber).toBe("TSTNC5");
+
+    const workingSend = vi
+      .fn()
+      .mockResolvedValue({ isValid: true, statusCode: "00", statusDescription: "ok", errors: [], rawResponse: "" });
+    const accepted = await retryCreditNoteSend(companyId, contingencyNote.id, undefined, {
+      secretStore: fakeSecretStore,
+      xmlStore,
+      createProvider: () => fakeProvider({ send: workingSend }),
+    });
+
+    expect(accepted.status).toBe("ACCEPTED");
+    expect(accepted.noteNumber).toBe("TSTNC5");
+    const [resent] = workingSend.mock.calls[0] as [{ signedXml: string }];
+    expect(resent.signedXml).toBe("<signed-nc-contingency/>");
   });
 });

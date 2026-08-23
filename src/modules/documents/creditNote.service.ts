@@ -1,15 +1,15 @@
 import type { CreditNoteInput, DianKitConfig, SendOptions } from "@dian-kit/sdk-node";
 
 import { prisma } from "../../infrastructure/prisma.js";
-import { LocalFileCertificateSecretStore } from "../../providers/certificates/LocalFileCertificateSecretStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
+import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { env } from "../../shared/env.js";
+import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
+import { reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
-
-const defaultSecretStore = new LocalFileCertificateSecretStore(env.certificatesDir);
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
@@ -34,8 +34,9 @@ export interface CreateCreditNoteParams {
  * refuse to issue a note against anything but an ACCEPTED invoice.
  */
 export async function createCreditNote(params: CreateCreditNoteParams, deps: DocumentServiceDeps = {}) {
-  const secretStore = deps.secretStore ?? defaultSecretStore;
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.creditNote.findUnique({
@@ -102,14 +103,36 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
     } as CreditNoteInput;
 
     const document = await provider.createCreditNote(input);
-    const response = await provider.send(document, params.send);
 
+    const xmlReference = creditNoteRecord.id;
+    await xmlStore.save(xmlReference, document.signedXml);
+
+    const outcome = await sendWithContingencyHandling(provider, document, params.send);
+
+    if (outcome.kind === "contingency") {
+      return await prisma.creditNote.update({
+        where: { id: creditNoteRecord.id },
+        data: {
+          noteNumber: document.documentNumber,
+          prefix: numbering.prefix,
+          cufe: document.uuid,
+          xmlReference,
+          status: "CONTINGENCY",
+          simulated,
+          issuedAt: new Date(),
+          errorMessage: outcome.error.message,
+        },
+      });
+    }
+
+    const { response } = outcome;
     return await prisma.creditNote.update({
       where: { id: creditNoteRecord.id },
       data: {
         noteNumber: document.documentNumber,
         prefix: numbering.prefix,
         cufe: document.uuid,
+        xmlReference,
         status: response.isValid ? "ACCEPTED" : "REJECTED",
         simulated,
         issuedAt: new Date(),
@@ -129,6 +152,53 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
     });
     throw error;
   }
+}
+
+/** Retries sending a CONTINGENCY credit note — see retryInvoiceSend in invoice.service.ts for the full rationale. */
+export async function retryCreditNoteSend(
+  companyId: string,
+  id: string,
+  send?: SendOptions,
+  deps: DocumentServiceDeps = {},
+) {
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
+  const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const simulated = !deps.createProvider && env.dianSimulationMode;
+
+  const creditNote = await prisma.creditNote.findFirst({ where: { id, companyId } });
+  if (!creditNote) {
+    throw new Error(`Credit note ${id} not found for company ${companyId}`);
+  }
+  if (creditNote.status !== "CONTINGENCY") {
+    throw new Error(`Credit note ${id} is not in CONTINGENCY (status=${creditNote.status}) — nothing to retry.`);
+  }
+  if (!creditNote.xmlReference || !creditNote.noteNumber || !creditNote.cufe) {
+    throw new Error(`Credit note ${id} is CONTINGENCY but missing xmlReference/noteNumber/cufe — cannot resend.`);
+  }
+
+  const { config } = await loadDianConfig({ companyId, documentType: "91" }, secretStore);
+  const provider = createProvider(config);
+  const signedXml = await xmlStore.get(creditNote.xmlReference);
+  const document = reconstructDocumentForResend(signedXml, creditNote.noteNumber, creditNote.cufe);
+
+  const outcome = await sendWithContingencyHandling(provider, document, send);
+
+  if (outcome.kind === "contingency") {
+    return await prisma.creditNote.update({ where: { id: creditNote.id }, data: { errorMessage: outcome.error.message } });
+  }
+
+  const { response } = outcome;
+  return await prisma.creditNote.update({
+    where: { id: creditNote.id },
+    data: {
+      status: response.isValid ? "ACCEPTED" : "REJECTED",
+      simulated,
+      sentAt: new Date(),
+      acceptedAt: response.isValid ? new Date() : null,
+      errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
+    },
+  });
 }
 
 export async function getCreditNote(companyId: string, id: string) {

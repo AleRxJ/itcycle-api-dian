@@ -24,8 +24,11 @@ export const DiscrepancyInputSchema = z.object({
   description: z.string(),
 });
 
+// companyId is NOT part of either body — it's derived from the authenticated
+// API key (request.company.id, set by requireApiKey) so a caller can never
+// operate on a company other than the one its key belongs to.
+
 export const CreateInvoiceBodySchema = z.object({
-  companyId: z.string(),
   internalReference: z.string(),
   invoice: DocumentBodySchema,
   send: SendOptionsSchema,
@@ -37,8 +40,12 @@ export const CreateInvoiceBodySchema = z.object({
  * as `invoice` above, minus documentType/operationType/billingReference/
  * discrepancyResponse, which the service injects itself).
  */
+/** Body for POST .../:id/retry-send — send options are optional, same shape as the create endpoints. */
+export const RetrySendBodySchema = z.object({
+  send: SendOptionsSchema,
+});
+
 export const CreateNoteBodySchema = z.object({
-  companyId: z.string(),
   internalReference: z.string(),
   invoiceId: z.string(),
   document: DocumentBodySchema,

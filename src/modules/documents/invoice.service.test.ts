@@ -1,9 +1,11 @@
+import { DianTransportError } from "@dian-kit/sdk-node";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { prisma } from "../../infrastructure/prisma.js";
 import type { CertificateSecretStore } from "../../providers/certificates/CertificateSecretStore.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
-import { createInvoice } from "./invoice.service.js";
+import type { DocumentXmlStore } from "../../providers/documents/DocumentXmlStore.js";
+import { createInvoice, retryInvoiceSend } from "./invoice.service.js";
 
 // Same approach as test-invoice.service.test.ts: exercises idempotency,
 // status transitions, and server-side numbering against the real dev
@@ -18,6 +20,23 @@ const fakeSecretStore: CertificateSecretStore = {
   get: vi.fn().mockResolvedValue({ p12: Buffer.from("fake"), password: "fake" }),
   delete: vi.fn(),
 };
+
+function fakeXmlStore(): DocumentXmlStore {
+  const files = new Map<string, string>();
+  return {
+    save: vi.fn(async (ref: string, xml: string) => {
+      files.set(ref, xml);
+    }),
+    get: vi.fn(async (ref: string) => {
+      const xml = files.get(ref);
+      if (xml === undefined) throw new Error(`no xml stored for ${ref}`);
+      return xml;
+    }),
+    delete: vi.fn(async (ref: string) => {
+      files.delete(ref);
+    }),
+  };
+}
 
 function fakeProvider(overrides: Partial<DianProvider> = {}): DianProvider {
   return {
@@ -119,7 +138,11 @@ describe("createInvoice", () => {
 
     const result = await createInvoice(
       { companyId, internalReference: "ref-1", invoice: invoiceInput() },
-      { secretStore: fakeSecretStore, createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }) },
+      {
+        secretStore: fakeSecretStore,
+        xmlStore: fakeXmlStore(),
+        createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }),
+      },
     );
 
     expect(result.status).toBe("ACCEPTED");
@@ -146,7 +169,11 @@ describe("createInvoice", () => {
 
     const result = await createInvoice(
       { companyId, internalReference: "ref-2", invoice: invoiceInput() },
-      { secretStore: fakeSecretStore, createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }) },
+      {
+        secretStore: fakeSecretStore,
+        xmlStore: fakeXmlStore(),
+        createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }),
+      },
     );
 
     expect(result.status).toBe("REJECTED");
@@ -178,6 +205,7 @@ describe("createInvoice", () => {
       .mockResolvedValue({ isValid: true, statusCode: "00", statusDescription: "ok", errors: [], rawResponse: "" });
     const deps = {
       secretStore: fakeSecretStore,
+      xmlStore: fakeXmlStore(),
       createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }),
     };
 
@@ -190,5 +218,117 @@ describe("createInvoice", () => {
     expect(second.id).toBe(first.id);
     expect(createInvoiceMock).toHaveBeenCalledTimes(1);
     expect(numberingAfterSecond.currentNumber).toBe(numberingAfterFirst.currentNumber);
+  });
+
+  it("falls back to CONTINGENCY (not ERROR) when send() fails because DIAN is unreachable", async () => {
+    const createInvoiceMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed-xml-for-contingency/>", uuid: "cufe-5", documentNumber: "TSTI5" });
+    const send = vi.fn().mockRejectedValue(new DianTransportError("Timeout: el servicio DIAN no respondió"));
+    const xmlStore = fakeXmlStore();
+
+    const result = await createInvoice(
+      { companyId, internalReference: "ref-5", invoice: invoiceInput() },
+      { secretStore: fakeSecretStore, xmlStore, createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }) },
+    );
+
+    expect(result.status).toBe("CONTINGENCY");
+    expect(result.invoiceNumber).toBe("TSTI5");
+    expect(result.cufe).toBe("cufe-5");
+    expect(result.xmlReference).toBe(result.id);
+    expect(await xmlStore.get(result.xmlReference!)).toBe("<signed-xml-for-contingency/>");
+  });
+
+  it("a non-DianTransportError from send() still marks the invoice ERROR, not CONTINGENCY", async () => {
+    const createInvoiceMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed/>", uuid: "cufe-6", documentNumber: "TSTI6" });
+    const send = vi.fn().mockRejectedValue(new Error("unexpected bug, not a DIAN outage"));
+
+    await expect(
+      createInvoice(
+        { companyId, internalReference: "ref-6", invoice: invoiceInput() },
+        { secretStore: fakeSecretStore, xmlStore: fakeXmlStore(), createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }) },
+      ),
+    ).rejects.toThrow("unexpected bug, not a DIAN outage");
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { companyId_internalReference: { companyId, internalReference: "ref-6" } },
+    });
+    expect(invoice?.status).toBe("ERROR");
+  });
+});
+
+describe("retryInvoiceSend", () => {
+  it("stays CONTINGENCY when DIAN is still unreachable, without losing the already-delivered document", async () => {
+    const createInvoiceMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed-xml-retry/>", uuid: "cufe-retry-1", documentNumber: "TSTI7" });
+    const failingSend = vi.fn().mockRejectedValue(new DianTransportError("still down"));
+    const xmlStore = fakeXmlStore();
+    const secretStore = fakeSecretStore;
+
+    const contingencyInvoice = await createInvoice(
+      { companyId, internalReference: "ref-7", invoice: invoiceInput() },
+      { secretStore, xmlStore, createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send: failingSend }) },
+    );
+    expect(contingencyInvoice.status).toBe("CONTINGENCY");
+
+    const stillFailingSend = vi.fn().mockRejectedValue(new DianTransportError("still down"));
+    const retried = await retryInvoiceSend(companyId, contingencyInvoice.id, undefined, {
+      secretStore,
+      xmlStore,
+      createProvider: () => fakeProvider({ send: stillFailingSend }),
+    });
+
+    expect(retried.status).toBe("CONTINGENCY");
+    expect(stillFailingSend).toHaveBeenCalledTimes(1);
+    const [resentDocument] = stillFailingSend.mock.calls[0] as [{ signedXml: string; documentNumber: string }];
+    expect(resentDocument.signedXml).toBe("<signed-xml-retry/>");
+    expect(resentDocument.documentNumber).toBe("TSTI7");
+  });
+
+  it("transitions CONTINGENCY to ACCEPTED once DIAN responds, reusing the original document number and CUFE", async () => {
+    const createInvoiceMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed-xml-retry-2/>", uuid: "cufe-retry-2", documentNumber: "TSTI8" });
+    const failingSend = vi.fn().mockRejectedValue(new DianTransportError("down at issuance time"));
+    const xmlStore = fakeXmlStore();
+
+    const contingencyInvoice = await createInvoice(
+      { companyId, internalReference: "ref-8", invoice: invoiceInput() },
+      { secretStore: fakeSecretStore, xmlStore, createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send: failingSend }) },
+    );
+
+    const nowWorkingSend = vi
+      .fn()
+      .mockResolvedValue({ isValid: true, statusCode: "00", statusDescription: "ok", errors: [], rawResponse: "" });
+    const accepted = await retryInvoiceSend(companyId, contingencyInvoice.id, undefined, {
+      secretStore: fakeSecretStore,
+      xmlStore,
+      createProvider: () => fakeProvider({ send: nowWorkingSend }),
+    });
+
+    expect(accepted.status).toBe("ACCEPTED");
+    expect(accepted.invoiceNumber).toBe("TSTI8");
+    expect(accepted.cufe).toBe("cufe-retry-2");
+  });
+
+  it("refuses to retry a document that isn't in CONTINGENCY", async () => {
+    const createInvoiceMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed/>", uuid: "cufe-9", documentNumber: "TSTI9" });
+    const send = vi
+      .fn()
+      .mockResolvedValue({ isValid: true, statusCode: "00", statusDescription: "ok", errors: [], rawResponse: "" });
+
+    const acceptedInvoice = await createInvoice(
+      { companyId, internalReference: "ref-9", invoice: invoiceInput() },
+      { secretStore: fakeSecretStore, xmlStore: fakeXmlStore(), createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }) },
+    );
+
+    await expect(
+      retryInvoiceSend(companyId, acceptedInvoice.id, undefined, { secretStore: fakeSecretStore, xmlStore: fakeXmlStore() }),
+    ).rejects.toThrow(/not in CONTINGENCY/);
   });
 });

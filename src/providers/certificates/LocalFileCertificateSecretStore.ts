@@ -8,9 +8,12 @@ import type { CertificateSecret, CertificateSecretStore } from "./CertificateSec
  * only. Stores each certificate as `<baseDir>/<ref>.p12` plus a sibling
  * `<baseDir>/<ref>.password` plaintext file.
  *
- * NEVER use this in production. `baseDir` must stay outside of git (see
- * `.gitignore`) — swap this class for a Vault/KMS/HSM-backed implementation
- * of the same interface when deploying for real.
+ * NEVER use this in production — see {@link EncryptedFileCertificateSecretStore}
+ * (AES-256-GCM at rest), which is the default for the production document
+ * services (src/shared/certificateStore.ts) whenever CERTIFICATE_ENCRYPTION_KEY
+ * is set. This class remains only as the dev/test fallback and for the
+ * dev-only test-invoice flow (docs/dian/sandbox-tests.md). `baseDir` must
+ * stay outside of git (see `.gitignore`) regardless of which store is used.
  */
 export class LocalFileCertificateSecretStore implements CertificateSecretStore {
   constructor(private readonly baseDir: string) {}
