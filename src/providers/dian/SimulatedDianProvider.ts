@@ -45,6 +45,9 @@ export class SimulatedDianProvider implements DianProvider {
 
   createDebitNote: DianProvider["createDebitNote"] = (input) => this.real.createDebitNote(input);
 
+  createSupportDocument: DianProvider["createSupportDocument"] = (input) =>
+    this.real.createSupportDocument(input);
+
   async send(document: DocumentResult): Promise<DianSendResponse> {
     return {
       isValid: true,

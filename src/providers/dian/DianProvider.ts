@@ -9,6 +9,7 @@ import type {
   InvoiceInput,
   LookupBuyerOptions,
   SendOptions,
+  SupportDocumentInput,
 } from "@dian-kit/sdk-node";
 
 /**
@@ -23,6 +24,7 @@ export interface DianProvider {
   createInvoice(input: InvoiceInput): Promise<DocumentResult>;
   createCreditNote(input: CreditNoteInput): Promise<DocumentResult>;
   createDebitNote(input: DebitNoteInput): Promise<DocumentResult>;
+  createSupportDocument(input: SupportDocumentInput): Promise<DocumentResult>;
   send(document: DocumentResult, options?: SendOptions): Promise<DianSendResponse>;
   getStatus(trackId: string): Promise<DianStatusResponse>;
   getStatusZip(trackId: string): Promise<DianStatusResponse>;

@@ -6,6 +6,7 @@ import {
   createApiKeyForCompany,
   createCompany,
   createNumberingResolution,
+  getFirmaPassStatus,
   setDianConfiguration,
   uploadCertificate,
 } from "./admin.service.js";
@@ -96,6 +97,41 @@ describe("admin provisioning", () => {
 
     const stored = await prisma.certificate.findUniqueOrThrow({ where: { id: result.id } });
     expect(stored.certificateIdentifier).toBe("cert-123");
+  });
+
+  it("getFirmaPassStatus reports loginKeySet and lists only firmapass-provider certificates", async () => {
+    const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+
+    const beforeKey = await getFirmaPassStatus(company.id);
+    expect(beforeKey.loginKeySet).toBe(false);
+    expect(beforeKey.certificates).toEqual([]);
+
+    await prisma.company.update({ where: { id: company.id }, data: { firmaPassLoginKeyCiphertext: "fake-ciphertext" } });
+    await prisma.certificate.create({
+      data: {
+        companyId: company.id,
+        provider: "firmapass",
+        certificateIdentifier: "status-test-cert",
+        secretReference: "status-test-secret",
+        expiresAt: null,
+        status: "INACTIVE",
+      },
+    });
+    await uploadCertificate({
+      companyId: company.id,
+      provider: "test", // non-firmapass — must NOT show up in the FirmaPass status list
+      certificateIdentifier: "other-provider-cert",
+      p12Base64: Buffer.from("fake").toString("base64"),
+      password: "pw",
+      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
+    });
+
+    const afterKey = await getFirmaPassStatus(company.id);
+    expect(afterKey.loginKeySet).toBe(true);
+    expect(afterKey.certificates).toHaveLength(1);
+    expect(afterKey.certificates[0].certificateIdentifier).toBe("status-test-cert");
+    expect(afterKey.certificates[0].status).toBe("INACTIVE");
+    expect(afterKey.certificates[0].expiresAt).toBeNull();
   });
 
   it("createApiKeyForCompany returns a raw key whose hash matches what's persisted", async () => {

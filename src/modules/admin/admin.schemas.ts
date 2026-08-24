@@ -19,7 +19,7 @@ export const SetDianConfigurationBodySchema = z.object({
 });
 
 export const CreateNumberingResolutionBodySchema = z.object({
-  documentType: z.enum(["01", "91", "92"]),
+  documentType: z.enum(["01", "91", "92", "05"]),
   prefix: z.string(),
   resolutionNumber: z.string(),
   startNumber: z.number().int(),
@@ -38,4 +38,18 @@ export const UploadCertificateBodySchema = z.object({
 
 export const CreateApiKeyBodySchema = z.object({
   label: z.string(),
+});
+
+export const SetFirmaPassLoginKeyBodySchema = z.object({
+  loginKey: z.string(),
+});
+
+export const FirmaPassUploadRutBodySchema = z.object({
+  rutBase64: z.string(),
+  identificacionRepresentanteLegal: z.string().optional(),
+});
+
+export const FirmaPassUploadArchivoBodySchema = z.object({
+  type: z.string(),
+  fileBase64: z.string(),
 });

@@ -45,6 +45,11 @@ model Company {
   dv         String
   personType String // DIAN PersonType code: "1" Juridica, "2" Natural
   status     RecordStatus @default(ACTIVE)
+  /// FirmaPass login key (Bearer token for identidad.firmapass.com), AES-256-GCM
+  /// encrypted at rest via src/shared/secretEncryption.ts + FIRMAPASS_ENCRYPTION_KEY.
+  /// One active login key per company, mirroring FirmaPass's own one-key-per-account
+  /// model. Never returned by any API response.
+  firmaPassLoginKeyCiphertext String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -55,6 +60,7 @@ model Company {
   invoices             Invoice[]
   creditNotes          CreditNote[]
   debitNotes           DebitNote[]
+  supportDocuments     SupportDocument[]
   apiKeys              ApiKey[]
 
   @@unique([nit, dv])
@@ -111,9 +117,10 @@ model DianConfiguration {
 /// different prefixes); `currentNumber` tracks the next number to issue.
 ///
 /// DIAN requires a separate authorized numbering range per document type
-/// (factura != nota credito != nota debito) — `documentType` (DIAN document
-/// type code: "01" factura, "91" nota credito, "92" nota debito) is what
-/// `claimNextNumber` filters on so each document type advances its own range.
+/// (factura != nota credito != nota debito != documento soporte) —
+/// `documentType` (DIAN document type code: "01" factura, "91" nota credito,
+/// "92" nota debito, "05" documento soporte) is what `claimNextNumber`
+/// filters on so each document type advances its own range.
 model NumberingResolution {
   id               String       @id @default(cuid())
   companyId        String
@@ -130,10 +137,11 @@ model NumberingResolution {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoices    Invoice[]
-  creditNotes CreditNote[]
-  debitNotes  DebitNote[]
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices         Invoice[]
+  creditNotes      CreditNote[]
+  debitNotes       DebitNote[]
+  supportDocuments SupportDocument[]
 
   @@unique([companyId, prefix])
   @@index([companyId])
@@ -149,16 +157,21 @@ model Certificate {
   provider               String // e.g. "firmapass"
   certificateIdentifier  String // provider-side reference, not the cert itself
   secretReference        String // pointer into CertificateSecretStore
-  expiresAt              DateTime
+  /// Null while a FirmaPass certificate is still being issued (status
+  /// INACTIVE, real value not known until the provider confirms — see
+  /// src/jobs/firmaPassIssuance.job.ts). Always set for non-FirmaPass
+  /// providers, and set for FirmaPass once issuance finishes.
+  expiresAt              DateTime?
   status                 RecordStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoices    Invoice[]
-  creditNotes CreditNote[]
-  debitNotes  DebitNote[]
+  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices         Invoice[]
+  creditNotes      CreditNote[]
+  debitNotes       DebitNote[]
+  supportDocuments SupportDocument[]
 
   @@index([companyId])
 }
@@ -277,4 +290,39 @@ model DebitNote {
   @@unique([companyId, internalReference])
   @@index([companyId, status])
   @@index([invoiceId])
+}
+
+/// A Documento Soporte (DIAN type 05) — a self-issued document for
+/// acquisitions from suppliers not obligated to issue an electronic invoice.
+/// Unlike CreditNote/DebitNote, this is standalone: it does not reference or
+/// correct a prior Invoice.
+model SupportDocument {
+  id                     String        @id @default(cuid())
+  companyId              String
+  numberingId            String?
+  certificateId          String?
+  internalReference      String // idempotency key
+  documentNumber         String? // full number, e.g. "DSNO0000001"
+  prefix                 String?
+  cufe                   String? // CUDE, despite the field name (matches Invoice/CreditNote/DebitNote's own convention)
+  status                 InvoiceStatus @default(PENDING)
+  simulated              Boolean       @default(false)
+  xmlReference           String?
+  dianResponseReference  String?
+  issuedAt               DateTime?
+  sentAt                 DateTime?
+  acceptedAt             DateTime?
+  rejectedAt             DateTime?
+  errorCode              String?
+  errorMessage           String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  numbering   NumberingResolution? @relation(fields: [numberingId], references: [id])
+  certificate Certificate?         @relation(fields: [certificateId], references: [id])
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
 }

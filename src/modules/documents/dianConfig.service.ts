@@ -6,9 +6,9 @@ import type { CertificateSecretStore } from "../../providers/certificates/Certif
 /**
  * DIAN document type codes this module claims numbering for. Kept as a
  * plain union (not the full DIAN code list in dian-engine's DocumentType
- * constant) because only these three are wired up on the ITCycle side.
+ * constant) because only these four are wired up on the ITCycle side.
  */
-export type NumberedDocumentType = "01" | "91" | "92";
+export type NumberedDocumentType = "01" | "91" | "92" | "05";
 
 export interface LoadDianConfigParams {
   companyId: string;

@@ -5,6 +5,7 @@ import { retryCreditNoteSend } from "../modules/documents/creditNote.service.js"
 import { retryDebitNoteSend } from "../modules/documents/debitNote.service.js";
 import type { DocumentServiceDeps } from "../modules/documents/invoice.service.js";
 import { retryInvoiceSend } from "../modules/documents/invoice.service.js";
+import { retrySupportDocumentSend } from "../modules/documents/supportDocument.service.js";
 import { prisma } from "../infrastructure/prisma.js";
 import { env } from "../shared/env.js";
 
@@ -33,10 +34,11 @@ export async function retryAllContingencyDocuments(
 ): Promise<ContingencyRetrySummary> {
   const summary: ContingencyRetrySummary = { attempted: 0, accepted: 0, stillContingency: 0, failed: 0 };
 
-  const [invoices, creditNotes, debitNotes] = await Promise.all([
+  const [invoices, creditNotes, debitNotes, supportDocuments] = await Promise.all([
     prisma.invoice.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
     prisma.creditNote.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
     prisma.debitNote.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
+    prisma.supportDocument.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
   ]);
 
   for (const invoice of invoices) {
@@ -69,6 +71,17 @@ export async function retryAllContingencyDocuments(
     } catch (error) {
       summary.failed += 1;
       logger?.warn({ error, debitNoteId: debitNote.id }, "contingency retry failed for debit note");
+    }
+  }
+
+  for (const supportDocument of supportDocuments) {
+    summary.attempted += 1;
+    try {
+      const result = await retrySupportDocumentSend(supportDocument.companyId, supportDocument.id, undefined, deps);
+      tally(summary, result.status);
+    } catch (error) {
+      summary.failed += 1;
+      logger?.warn({ error, supportDocumentId: supportDocument.id }, "contingency retry failed for support document");
     }
   }
 

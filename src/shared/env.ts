@@ -35,4 +35,13 @@ export const env = {
   startScheduler: process.env.START_SCHEDULER !== "false",
   /** Cron expression for how often CONTINGENCY documents are automatically retried. Default: every 10 minutes. */
   contingencyRetryCron: process.env.CONTINGENCY_RETRY_CRON ?? "*/10 * * * *",
+  /**
+   * 32-byte key (base64url) encrypting Company.firmaPassLoginKeyCiphertext at
+   * rest — see src/shared/secretEncryption.ts. Deliberately separate from
+   * CERTIFICATE_ENCRYPTION_KEY (different secret category, never share a key
+   * across categories).
+   */
+  firmaPassEncryptionKey: process.env.FIRMAPASS_ENCRYPTION_KEY,
+  /** Cron expression for how often pending FirmaPass certificate issuances are polled. Default: every 10 minutes. */
+  firmaPassIssuanceCron: process.env.FIRMAPASS_ISSUANCE_CRON ?? "*/10 * * * *",
 };

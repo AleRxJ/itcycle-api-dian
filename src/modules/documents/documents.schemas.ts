@@ -52,3 +52,10 @@ export const CreateNoteBodySchema = z.object({
   discrepancyResponse: DiscrepancyInputSchema,
   send: SendOptionsSchema,
 });
+
+/** Body for POST /api/v1/documents/support-documents — field named "document", not "invoice" (it isn't one). */
+export const CreateSupportDocumentBodySchema = z.object({
+  internalReference: z.string(),
+  document: DocumentBodySchema,
+  send: SendOptionsSchema,
+});

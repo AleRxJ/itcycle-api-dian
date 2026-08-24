@@ -39,7 +39,7 @@ export async function setDianConfiguration(params: SetDianConfigurationParams) {
 
 export interface CreateNumberingResolutionParams {
   companyId: string;
-  documentType: "01" | "91" | "92";
+  documentType: "01" | "91" | "92" | "05";
   prefix: string;
   resolutionNumber: string;
   startNumber: number;
@@ -99,6 +99,39 @@ export async function uploadCertificate(params: UploadCertificateParams) {
   });
 
   return { id: certificate.id, certificateIdentifier: certificate.certificateIdentifier, expiresAt: certificate.expiresAt };
+}
+
+export interface FirmaPassStatusCertificate {
+  id: string;
+  certificateIdentifier: string;
+  status: string;
+  expiresAt: Date | null;
+  createdAt: Date;
+}
+
+export interface FirmaPassStatus {
+  loginKeySet: boolean;
+  certificates: FirmaPassStatusCertificate[];
+}
+
+/** Read-only snapshot for Ohnix's admin UI — no schema change, just a projection of existing columns. */
+export async function getFirmaPassStatus(companyId: string): Promise<FirmaPassStatus> {
+  const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
+  const certificates = await prisma.certificate.findMany({
+    where: { companyId, provider: "firmapass" },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return {
+    loginKeySet: Boolean(company.firmaPassLoginKeyCiphertext),
+    certificates: certificates.map((c) => ({
+      id: c.id,
+      certificateIdentifier: c.certificateIdentifier,
+      status: c.status,
+      expiresAt: c.expiresAt,
+      createdAt: c.createdAt,
+    })),
+  };
 }
 
 export interface CreateApiKeyParams {

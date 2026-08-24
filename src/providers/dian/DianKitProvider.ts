@@ -20,6 +20,9 @@ export class DianKitProvider implements DianProvider {
 
   createDebitNote: DianProvider["createDebitNote"] = (input) => this.kit.createDebitNote(input);
 
+  createSupportDocument: DianProvider["createSupportDocument"] = (input) =>
+    this.kit.createSupportDocument(input);
+
   send: DianProvider["send"] = (document, options) => this.kit.send(document, options);
 
   getStatus: DianProvider["getStatus"] = (trackId) => this.kit.getStatus(trackId);
