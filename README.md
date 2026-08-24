@@ -15,18 +15,22 @@ DianProvider                     ← abstracción propia (src/providers/dian/)
    ├── DianKitProvider            → motor real
    └── SimulatedDianProvider      → motor real + envío simulado (solo dev/demo)
    ▼
-dian-engine/                     ← submódulo git de sergioarojasm98/dian-kit (MIT)
+dian-engine/                     ← vendored de sergioarojasm98/dian-kit (MIT)
    │  UBL 2.1, firma XAdES-EPES, CUFE/CUDE, SOAP/WS-Security
    ▼
 DIAN
 ```
 
-`dian-engine/` es el motor técnico de facturación electrónica: se usa tal cual, sin
-modificaciones, y se actualiza deliberadamente (nunca automático) — ver
-[`docs/dian/compatibility.md`](docs/dian/compatibility.md). Es el mismo proyecto open source
-`sergioarojasm98/dian-kit`, solo renombrado localmente para no confundirse con el nombre del
-producto ITCycle; los paquetes npm que expone conservan su nombre real
-(`@dian-kit/core`, `@dian-kit/sdk-node`).
+`dian-engine/` es el motor técnico de facturación electrónica, vendored directamente en este
+repo (ya no como git submodule — ver [`docs/dian/compatibility.md`](docs/dian/compatibility.md)
+para el porqué). Es el mismo proyecto open source `sergioarojasm98/dian-kit`, solo renombrado
+localmente para no confundirse con el nombre del producto ITCycle; los paquetes npm que expone
+conservan su nombre real (`@dian-kit/core`, `@dian-kit/sdk-node`). Actualizar desde upstream es
+un proceso manual (traer los cambios a mano), no un simple pull de submodule.
+
+`itcycle-api-dian` y `dian-engine/packages/*` viven en un único **pnpm workspace** (ver
+[`pnpm-workspace.yaml`](pnpm-workspace.yaml)): un solo `pnpm install` + `pnpm build` compila
+todo, sin pasos separados.
 
 Todo lo demás — API, tenants, configuración DIAN por empresa, certificados, idempotencia,
 estados, futura API pública y cobro por documento — es código propio de ITCycle en `src/`. La
@@ -40,17 +44,13 @@ Node.js 20+, TypeScript, Fastify, PostgreSQL vía Prisma, pnpm.
 ## Setup
 
 ```bash
-git clone --recurse-submodules <url>
-# o, si ya clonaste sin submódulos:
-git submodule update --init --recursive
+git clone <url>
 
 corepack enable
 corepack prepare pnpm@9.15.4 --activate
 
-# el motor DIAN se instala/compila por separado, como proyecto independiente
-cd dian-engine && pnpm install && pnpm build && cd ..
-
-pnpm install
+pnpm install   # instala todo el workspace, incluyendo dian-engine/packages/*
+pnpm build     # compila dian-engine (tsup), genera el cliente Prisma y compila src/
 cp .env.example .env   # completa DATABASE_URL, DEV_API_KEY, etc.
 pnpm db:migrate
 pnpm dev

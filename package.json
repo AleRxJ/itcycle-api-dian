@@ -12,7 +12,8 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build:engine": "pnpm --filter @dian-kit/core --filter @dian-kit/sdk-node run build",
+    "build": "pnpm run build:engine && prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -23,8 +24,8 @@
     "db:seed:test-company": "tsx scripts/seed-test-company.ts"
   },
   "dependencies": {
-    "@dian-kit/core": "link:./dian-engine/packages/core",
-    "@dian-kit/sdk-node": "link:./dian-engine/packages/sdk-node",
+    "@dian-kit/core": "workspace:*",
+    "@dian-kit/sdk-node": "workspace:*",
     "@prisma/client": "^6.2.1",
     "dotenv": "^16.4.5",
     "fastify": "^5.2.0",

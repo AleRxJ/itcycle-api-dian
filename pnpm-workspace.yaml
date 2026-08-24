@@ -1,0 +1,4 @@
+packages:
+  - "."
+  - "dian-engine"
+  - "dian-engine/packages/*"

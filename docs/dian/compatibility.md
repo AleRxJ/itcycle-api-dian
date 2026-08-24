@@ -6,7 +6,7 @@ Registro de versiones y compatibilidad entre DIAN, `dian-kit` (motor) e ITCycle 
 
 | Componente | Versión / Referencia |
 |---|---|
-| `dian-engine` (submódulo dian-kit) | commit `15573c9c7190e4ae492f02158501d16bbd283ce7` (rama `main` del upstream, 2026-05-25) |
+| `dian-engine` (vendored de dian-kit) | basado en commit upstream `15573c9c7190e4ae492f02158501d16bbd283ce7` + parche local de Documento Soporte (`b2f5a41`, no publicado upstream) |
 | `@dian-kit/core` | 1.0.1 |
 | `@dian-kit/sdk-node` | 1.0.1 |
 | ITCycle DIAN API | sin versionar todavía (pre-alpha) |
@@ -32,6 +32,16 @@ eso no ha sido reproducido todavía dentro de este repositorio.
 - 2026-08-22: se renombra la carpeta del submódulo de `dian-kit/` a `dian-engine/` (solo la ruta
   local; el proyecto upstream y los paquetes npm `@dian-kit/core`/`@dian-kit/sdk-node` no cambian
   de nombre) para que no se confunda con el nombre del producto ITCycle.
+- 2026-08-24: se elimina el git submodule. No se tienen permisos de push sobre
+  `sergioarojasm98/dian-kit`, y ya se habían hecho cambios locales al motor (soporte para
+  Documento Soporte, tipo "05") que no tenía sentido intentar subir allá. `dian-engine/` ahora es
+  código vendored normal, tracked directamente en este repo — sin remoto externo. El historial
+  git completo del submódulo (hasta el commit `b2f5a41`) quedó respaldado fuera del repo en
+  `dian-engine-history-backup.bundle`, junto a `itcycle-api-dian/`. `itcycle-api-dian` y
+  `dian-engine/packages/*` pasan a compartir un único pnpm workspace (`pnpm-workspace.yaml`), así
+  un solo `pnpm install && pnpm build` compila todo — antes requería instalar/compilar
+  `dian-engine` como proyecto aparte. Contrapartida: actualizar desde el upstream de dian-kit ya
+  no es un `git submodule update`, hay que traer los cambios a mano.
 
 ## Issues conocidos
 
