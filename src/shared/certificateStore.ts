@@ -1,5 +1,7 @@
+import { prisma } from "../infrastructure/prisma.js";
 import { EncryptedFileCertificateSecretStore } from "../providers/certificates/EncryptedFileCertificateSecretStore.js";
 import { LocalFileCertificateSecretStore } from "../providers/certificates/LocalFileCertificateSecretStore.js";
+import { PrismaCertificateSecretStore } from "../providers/certificates/PrismaCertificateSecretStore.js";
 import type { CertificateSecretStore } from "../providers/certificates/CertificateSecretStore.js";
 import { env } from "./env.js";
 
@@ -15,6 +17,12 @@ import { env } from "./env.js";
  * var isn't set — tests inject their own secretStore and never hit this.
  */
 export function createDefaultCertificateSecretStore(): CertificateSecretStore {
+  if (env.storageDriver === "database") {
+    if (!env.certificateEncryptionKey) {
+      throw new Error("CERTIFICATE_ENCRYPTION_KEY is required when STORAGE_DRIVER=database.");
+    }
+    return new PrismaCertificateSecretStore(prisma, env.certificateEncryptionKey);
+  }
   if (env.certificateEncryptionKey) {
     return new EncryptedFileCertificateSecretStore(env.certificatesDir, env.certificateEncryptionKey);
   }

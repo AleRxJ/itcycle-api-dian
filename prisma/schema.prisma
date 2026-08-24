@@ -292,6 +292,35 @@ model DebitNote {
   @@index([invoiceId])
 }
 
+/// Postgres-backed CertificateSecretStore row (see
+/// src/providers/certificates/PrismaCertificateSecretStore.ts) — an
+/// alternative to the filesystem-backed stores for deployments without a
+/// persistent disk (e.g. Render's free tier, where local disk is wiped on
+/// every restart). `reference` matches Certificate.secretReference.
+/// Ciphertext columns are AES-256-GCM encrypted with CERTIFICATE_ENCRYPTION_KEY
+/// before they ever reach this table — Postgres never sees plaintext.
+model CertificateSecretBlob {
+  reference          String @id
+  p12Ciphertext      Bytes
+  passwordCiphertext Bytes
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Postgres-backed DocumentXmlStore row (see
+/// src/providers/documents/PrismaDocumentXmlStore.ts) — same motivation as
+/// CertificateSecretBlob. `reference` matches Invoice/CreditNote/DebitNote/
+/// SupportDocument.xmlReference. Not encrypted: the XML is the legal
+/// document itself, not a secret (see DocumentXmlStore.ts).
+model DocumentXmlBlob {
+  reference String @id
+  xml       String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// A Documento Soporte (DIAN type 05) — a self-issued document for
 /// acquisitions from suppliers not obligated to issue an electronic invoice.
 /// Unlike CreditNote/DebitNote, this is standalone: it does not reference or

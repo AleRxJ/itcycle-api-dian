@@ -7,6 +7,16 @@ export const env = {
   certificatesDir: process.env.CERTIFICATES_DIR ?? "./certs",
   /** Local directory for LocalFileDocumentXmlStore (signed document XML — not a secret, but never in git). */
   documentsDir: process.env.DOCUMENTS_DIR ?? "./documents",
+  /**
+   * "file" (default) uses CERTIFICATES_DIR/DOCUMENTS_DIR on local disk —
+   * fine for a host with a persistent disk, wrong for one without (e.g.
+   * Render's free tier, where disk is wiped on every restart/redeploy).
+   * "database" persists certificates/XML as rows in Postgres instead (see
+   * PrismaCertificateSecretStore / PrismaDocumentXmlStore) — no extra
+   * infrastructure needed beyond DATABASE_URL, at the cost of growing the
+   * app's own database with binary/XML blobs.
+   */
+  storageDriver: process.env.STORAGE_DRIVER === "database" ? "database" : "file",
   /** Shared secret protecting the dev-only /api/v1/dian/* routes. */
   devApiKey: process.env.DEV_API_KEY,
   /**
