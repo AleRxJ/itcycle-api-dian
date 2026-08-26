@@ -14,6 +14,7 @@ import {
   createApiKeyForCompany,
   createCompany,
   createNumberingResolution,
+  getDianReadiness,
   getFirmaPassStatus,
   setDianConfiguration,
   uploadCertificate,
@@ -113,5 +114,10 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/firmapass/status", async (request, reply) => {
     const status = await getFirmaPassStatus(request.params.id);
     return reply.send(status);
+  });
+
+  app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/dian-readiness", async (request, reply) => {
+    const readiness = await getDianReadiness(request.params.id);
+    return reply.code(200).send(readiness);
   });
 }

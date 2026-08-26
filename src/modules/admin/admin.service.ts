@@ -114,6 +114,92 @@ export interface FirmaPassStatus {
   certificates: FirmaPassStatusCertificate[];
 }
 
+export interface DianReadiness {
+  canIssueInvoices: boolean;
+  environment: "SANDBOX" | "PRODUCTION" | null;
+  configurationReady: boolean;
+  invoiceResolutionReady: boolean;
+  certificateReady: boolean;
+  activeCertificateCount: number;
+  missing: string[];
+  resolutions: Array<{
+    id: string;
+    documentType: string;
+    prefix: string;
+    resolutionNumber: string;
+    startDate: Date;
+    endDate: Date;
+    status: string;
+    isCurrent: boolean;
+  }>;
+  certificates: FirmaPassStatusCertificate[];
+}
+
+/**
+ * Authoritative readiness projection consumed by Ohnix. It intentionally
+ * evaluates the same prerequisites the document services need at runtime,
+ * but does so before a user clicks "emit". This makes onboarding truthful:
+ * provisioning alone never means a business can already invoice.
+ */
+export async function getDianReadiness(companyId: string): Promise<DianReadiness> {
+  const now = new Date();
+  const company = await prisma.company.findUniqueOrThrow({
+    where: { id: companyId },
+    include: {
+      dianConfiguration: true,
+      numberingResolutions: { orderBy: { createdAt: "desc" } },
+      certificates: { orderBy: { createdAt: "desc" } },
+    },
+  });
+
+  const configurationReady = Boolean(
+    company.dianConfiguration?.supplierProfile
+      && company.dianConfiguration.softwareId
+      && company.dianConfiguration.softwarePin,
+  );
+  const activeInvoiceResolution = company.numberingResolutions.find((resolution) =>
+    resolution.documentType === "01"
+      && resolution.status === "ACTIVE"
+      && resolution.startDate <= now
+      && resolution.endDate >= now
+      && resolution.currentNumber <= resolution.endNumber,
+  );
+  const activeCertificates = company.certificates.filter((certificate) =>
+    certificate.status === "ACTIVE" && (!certificate.expiresAt || certificate.expiresAt >= now),
+  );
+  const missing: string[] = [];
+  if (!configurationReady) missing.push("dian_configuration");
+  if (!activeInvoiceResolution) missing.push("invoice_resolution_01");
+  if (activeCertificates.length === 0) missing.push("active_certificate");
+
+  return {
+    canIssueInvoices: missing.length === 0,
+    environment: company.dianConfiguration?.environment ?? null,
+    configurationReady,
+    invoiceResolutionReady: Boolean(activeInvoiceResolution),
+    certificateReady: activeCertificates.length > 0,
+    activeCertificateCount: activeCertificates.length,
+    missing,
+    resolutions: company.numberingResolutions.map((resolution) => ({
+      id: resolution.id,
+      documentType: resolution.documentType,
+      prefix: resolution.prefix,
+      resolutionNumber: resolution.resolutionNumber,
+      startDate: resolution.startDate,
+      endDate: resolution.endDate,
+      status: resolution.status,
+      isCurrent: resolution.status === "ACTIVE" && resolution.startDate <= now && resolution.endDate >= now && resolution.currentNumber <= resolution.endNumber,
+    })),
+    certificates: company.certificates.map((certificate) => ({
+      id: certificate.id,
+      certificateIdentifier: certificate.certificateIdentifier,
+      status: certificate.status,
+      expiresAt: certificate.expiresAt,
+      createdAt: certificate.createdAt,
+    })),
+  };
+}
+
 /** Read-only snapshot for Ohnix's admin UI — no schema change, just a projection of existing columns. */
 export async function getFirmaPassStatus(companyId: string): Promise<FirmaPassStatus> {
   const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });

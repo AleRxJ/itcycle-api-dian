@@ -38,6 +38,7 @@ export async function loadDianConfig(
   params: LoadDianConfigParams,
   secretStore: CertificateSecretStore,
 ): Promise<LoadedDianConfig> {
+  const now = new Date();
   const company = await prisma.company.findUniqueOrThrow({
     where: { id: params.companyId },
     include: { dianConfiguration: true },
@@ -47,21 +48,38 @@ export async function loadDianConfig(
     throw new Error(`Company ${params.companyId} has no active DianConfiguration/supplierProfile`);
   }
 
-  const numbering = await prisma.numberingResolution.findFirst({
-    where: { companyId: params.companyId, documentType: params.documentType, status: "ACTIVE" },
+  // currentNumber <= endNumber can't be expressed as a Prisma `where` filter
+  // (it compares two columns of the same row), so date range/status are
+  // filtered in the query and exhaustion is filtered in JS below. Ordered by
+  // createdAt desc so the most recently provisioned match wins when a
+  // company has more than one qualifying row (e.g. right after a renewal) —
+  // matches admin.service.ts's getDianReadiness, which must agree with this
+  // function on which row is "the" active one.
+  const candidateResolutions = await prisma.numberingResolution.findMany({
+    where: {
+      companyId: params.companyId,
+      documentType: params.documentType,
+      status: "ACTIVE",
+      startDate: { lte: now },
+      endDate: { gte: now },
+    },
+    orderBy: { createdAt: "desc" },
   });
+  const numbering = candidateResolutions.find((resolution) => resolution.currentNumber <= resolution.endNumber);
   if (!numbering) {
     throw new Error(
-      `Company ${params.companyId} has no ACTIVE NumberingResolution for documentType="${params.documentType}". ` +
+      `Company ${params.companyId} has no ACTIVE, currently-valid, non-exhausted NumberingResolution for documentType="${params.documentType}". ` +
         "Provision one (e.g. via scripts/seed-test-company.ts or Prisma Studio) before issuing this document type.",
     );
   }
 
-  const certificate = await prisma.certificate.findFirst({
+  const candidateCertificates = await prisma.certificate.findMany({
     where: { companyId: params.companyId, status: "ACTIVE" },
+    orderBy: { createdAt: "desc" },
   });
+  const certificate = candidateCertificates.find((c) => !c.expiresAt || c.expiresAt >= now);
   if (!certificate) {
-    throw new Error(`Company ${params.companyId} has no ACTIVE Certificate.`);
+    throw new Error(`Company ${params.companyId} has no ACTIVE, non-expired Certificate.`);
   }
 
   const secret = await secretStore.get(certificate.secretReference);
