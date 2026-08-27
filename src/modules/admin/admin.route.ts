@@ -75,20 +75,22 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   // three read routes below (alliance-wide, not scoped to a companyId) are
   // how an Ohnix admin discovers and matches that validation to a company
   // BEFORE driving rut/archivos/confirmar for it.
-  app.get<{ Querystring: { page?: string; perPage?: string } }>(
+  app.get<{ Querystring: { perPage?: string } }>(
     "/api/v1/admin/firmapass/validations",
     async (request, reply) => {
-      const { page, perPage } = request.query;
+      const { perPage } = request.query;
       const result = await listPendingValidations({
-        page: page ? Number(page) : undefined,
         perPage: perPage ? Number(perPage) : undefined,
       });
       return reply.send(result);
     },
   );
 
+  // 204 (not 200 + null body) when the queue is empty - lets Ohnix's admin
+  // UI tell "nothing pending" apart from a real request/parsing failure.
   app.get("/api/v1/admin/firmapass/validations/nueva-solicitud", async (_request, reply) => {
     const result = await getNextPendingValidation();
+    if (!result) return reply.code(204).send();
     return reply.send(result);
   });
 

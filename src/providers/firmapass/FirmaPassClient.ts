@@ -57,16 +57,34 @@ export interface FirmaPassGetCertificateResponse {
 }
 
 /**
- * Deliberately loose: FirmaPass's list/detail responses carry identifying
- * fields (the buyer's email, name, etc.) beyond what our own flow reads
- * directly — pass them through rather than dropping them, so a human
- * matching a validation to an Ohnix company isn't missing the one field
- * FirmaPass actually put there.
+ * Verified against FirmaPass's own Postman collection (not paraphrased).
+ * There is no email field anywhere on a validation - `nombre` (a
+ * human-composed label, e.g. "Firma Factura Electronica ACME SAS") is the
+ * only identifying field, so matching a validation to an Ohnix company is a
+ * human/admin judgment call, not an automatic lookup. `[key: string]:
+ * unknown` stays as a safety net for anything not modeled here.
  */
 export interface FirmaPassValidationSummary {
   uuid: string;
+  nombre: string;
   estado: string;
   estado_descripcion: string;
+  categoria: string;
+  categoria_descripcion: string;
+  tipo: string;
+  tipo_descripcion: string;
+  categoria_tipo_descripcion: string;
+  created_at: string;
+  /**
+   * Signed, temporary URL where the CLIENT can complete the validation
+   * themselves on FirmaPass's own site (upload documents, etc.) - null once
+   * the validation is past `p`/`pvi`. This is FirmaPass's simpler
+   * recommended flow: handing the client this link needs no Ohnix-built
+   * upload UI at all.
+   */
+  completion_url: string | null;
+  pending_documents: unknown[] | null;
+  uploaded_documents: unknown;
   [key: string]: unknown;
 }
 
@@ -104,7 +122,7 @@ export class FirmaPassClient {
     private readonly baseUrl: string = DEFAULT_BASE_URL,
   ) {}
 
-  private async request<T>(path: string, init: RequestInit): Promise<T> {
+  private async request<T>(path: string, init: RequestInit, options: { treat404AsNull?: boolean } = {}): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -113,6 +131,10 @@ export class FirmaPassClient {
         ...init.headers,
       },
     });
+
+    if (response.status === 404 && options.treat404AsNull) {
+      return null as T;
+    }
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -158,18 +180,26 @@ export class FirmaPassClient {
     return this.request(`/api/certificados/${identificador}`, { method: "GET" });
   }
 
-  /** Paginated list of every validation visible to this login key (per_page 1-100). */
-  async listValidations(params: { page?: number; perPage?: number } = {}): Promise<FirmaPassListValidationsResponse> {
+  /**
+   * Every validation visible to this login key, newest first. `perPage` is
+   * the only real query param FirmaPass documents (integer 1-100, defaults
+   * to 20) — there is no documented `page` param despite `meta` echoing
+   * back current_page/last_page.
+   */
+  async listValidations(params: { perPage?: number } = {}): Promise<FirmaPassListValidationsResponse> {
     const query = new URLSearchParams();
-    if (params.page) query.set("page", String(params.page));
     if (params.perPage) query.set("per_page", String(params.perPage));
     const qs = query.toString();
     return this.request(`/api/validaciones-identidad${qs ? `?${qs}` : ""}`, { method: "GET" });
   }
 
-  /** Oldest pending validation with no documents uploaded yet — a simple FIFO "what's next". */
-  async getNuevaSolicitud(): Promise<FirmaPassGetValidationResponse> {
-    return this.request(`/api/validaciones-identidad/nueva-solicitud`, { method: "GET" });
+  /**
+   * Oldest validation (estado `p`/`pvi`) with no documents uploaded yet — a
+   * simple FIFO "what's next". Returns null when none exists (FirmaPass
+   * responds 404 for this — an expected, common state, not a failure).
+   */
+  async getNuevaSolicitud(): Promise<FirmaPassGetValidationResponse | null> {
+    return this.request(`/api/validaciones-identidad/nueva-solicitud`, { method: "GET" }, { treat404AsNull: true });
   }
 
   async getValidationDetail(validationUuid: string): Promise<FirmaPassGetValidationResponse> {

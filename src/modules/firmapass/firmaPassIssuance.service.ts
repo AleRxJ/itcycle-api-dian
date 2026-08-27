@@ -49,16 +49,15 @@ export async function uploadArchivo(params: UploadArchivoParams) {
 }
 
 export interface ListPendingValidationsParams {
-  page?: number;
   perPage?: number;
 }
 
-/** Every validation the alliance account can see (across all clients who bought with the coupon), for an admin to browse and match to an Ohnix company. */
+/** Every validation the alliance account can see (across all clients who bought with the coupon), for an admin to browse and match to an Ohnix company by its `nombre` label — FirmaPass exposes no email/identifier field to match on automatically. */
 export async function listPendingValidations(params: ListPendingValidationsParams = {}) {
   return getAllianceClient().listValidations(params);
 }
 
-/** FIFO convenience: the oldest validation still waiting on document upload. */
+/** FIFO convenience: the oldest validation still waiting on document upload, or null when the queue is empty. */
 export async function getNextPendingValidation() {
   return getAllianceClient().getNuevaSolicitud();
 }
