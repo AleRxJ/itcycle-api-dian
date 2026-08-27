@@ -57,11 +57,42 @@ export interface FirmaPassGetCertificateResponse {
 }
 
 /**
+ * Deliberately loose: FirmaPass's list/detail responses carry identifying
+ * fields (the buyer's email, name, etc.) beyond what our own flow reads
+ * directly — pass them through rather than dropping them, so a human
+ * matching a validation to an Ohnix company isn't missing the one field
+ * FirmaPass actually put there.
+ */
+export interface FirmaPassValidationSummary {
+  uuid: string;
+  estado: string;
+  estado_descripcion: string;
+  [key: string]: unknown;
+}
+
+export interface FirmaPassListValidationsResponse {
+  message?: string;
+  data: FirmaPassValidationSummary[];
+  meta?: Record<string, unknown>;
+}
+
+export interface FirmaPassValidationDetail extends FirmaPassValidationSummary {
+  current_certificate?: FirmaPassCertificateDetail | null;
+}
+
+export interface FirmaPassGetValidationResponse {
+  message?: string;
+  data: FirmaPassValidationDetail;
+}
+
+/**
  * Thin wrapper over the FirmaPass identity-validation/certificate-issuance
  * API (identidad.firmapass.com) — field/endpoint shapes verified against the
- * provider's own Postman collection, not paraphrased docs. Auth is a
- * per-company Bearer login key (see Company.firmaPassLoginKeyCiphertext),
- * passed explicitly to every call rather than read from a global env var.
+ * provider's own Postman collection, not paraphrased docs. Auth is a Bearer
+ * login key passed explicitly to every call rather than read from a global
+ * env var here — but every caller in this codebase now passes iTCycle's own
+ * shared "alianza" key (env.firmaPassAllianceLoginKey), never a per-company
+ * one; see modules/firmapass/firmaPassIssuance.service.ts for why.
  *
  * Note the two write endpoints that matter most for issuance (archivos,
  * confirmar) do NOT use the {message, data} envelope the GET endpoints use —
@@ -125,5 +156,23 @@ export class FirmaPassClient {
 
   async getCertificate(identificador: string): Promise<FirmaPassGetCertificateResponse> {
     return this.request(`/api/certificados/${identificador}`, { method: "GET" });
+  }
+
+  /** Paginated list of every validation visible to this login key (per_page 1-100). */
+  async listValidations(params: { page?: number; perPage?: number } = {}): Promise<FirmaPassListValidationsResponse> {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.perPage) query.set("per_page", String(params.perPage));
+    const qs = query.toString();
+    return this.request(`/api/validaciones-identidad${qs ? `?${qs}` : ""}`, { method: "GET" });
+  }
+
+  /** Oldest pending validation with no documents uploaded yet — a simple FIFO "what's next". */
+  async getNuevaSolicitud(): Promise<FirmaPassGetValidationResponse> {
+    return this.request(`/api/validaciones-identidad/nueva-solicitud`, { method: "GET" });
+  }
+
+  async getValidationDetail(validationUuid: string): Promise<FirmaPassGetValidationResponse> {
+    return this.request(`/api/validaciones-identidad/${validationUuid}`, { method: "GET" });
   }
 }

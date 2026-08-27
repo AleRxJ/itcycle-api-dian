@@ -13,9 +13,18 @@ vi.mock("../providers/firmapass/FirmaPassClient.js", () => ({
   })),
 }));
 
+// A plain `process.env.X ??= ...` above doesn't reliably beat env.ts's own
+// module-eval-time read (ESM hoists this file's imports - including the
+// transitive import of env.js - ahead of its own top-level statements,
+// regardless of source order) - vi.mock is the one mechanism guaranteed to
+// run before env.js is evaluated.
+vi.mock("../shared/env.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shared/env.js")>();
+  return { ...actual, env: { ...actual.env, firmaPassAllianceLoginKey: "test-alliance-login-key" } };
+});
+
 import { prisma } from "../infrastructure/prisma.js";
 import { createDefaultCertificateSecretStore } from "../shared/certificateStore.js";
-import { encryptSecret } from "../shared/secretEncryption.js";
 import { finalizePendingFirmaPassCertificates } from "./firmaPassIssuance.job.js";
 
 const TEST_NIT = "999000009";
@@ -94,13 +103,7 @@ async function cleanup(): Promise<void> {
 beforeAll(async () => {
   await cleanup();
   const company = await prisma.company.create({
-    data: {
-      name: "FirmaPass Job Test Co",
-      nit: TEST_NIT,
-      dv: TEST_DV,
-      personType: "1",
-      firmaPassLoginKeyCiphertext: encryptSecret("test-login-key"),
-    },
+    data: { name: "FirmaPass Job Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" },
   });
   companyId = company.id;
 });

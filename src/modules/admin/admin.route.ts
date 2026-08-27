@@ -7,7 +7,6 @@ import {
   FirmaPassUploadArchivoBodySchema,
   FirmaPassUploadRutBodySchema,
   SetDianConfigurationBodySchema,
-  SetFirmaPassLoginKeyBodySchema,
   UploadCertificateBodySchema,
 } from "./admin.schemas.js";
 import {
@@ -21,7 +20,9 @@ import {
 } from "./admin.service.js";
 import {
   confirmValidation,
-  setFirmaPassLoginKey,
+  getNextPendingValidation,
+  getValidationDetail,
+  listPendingValidations,
   uploadArchivo,
   uploadRut,
 } from "../firmapass/firmaPassIssuance.service.js";
@@ -68,12 +69,36 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   // FirmaPass digital-certificate issuance (see modules/firmapass/firmaPassIssuance.service.ts).
   // Automates from "an identity validation already exists in FirmaPass's own
   // portal" onward — creating that validation itself is not automated (no
-  // such endpoint exists in FirmaPass's API).
-  app.put<{ Params: { id: string } }>("/api/v1/admin/companies/:id/firmapass/login-key", async (request, reply) => {
-    const body = SetFirmaPassLoginKeyBodySchema.parse(request.body);
-    await setFirmaPassLoginKey(request.params.id, body.loginKey);
-    return reply.code(204).send();
+  // such endpoint exists in FirmaPass's API). A validation is created the
+  // moment a client buys a certificate on FirmaPass's own site with
+  // iTCycle's coupon, auto-attached to iTCycle's alliance account - the
+  // three read routes below (alliance-wide, not scoped to a companyId) are
+  // how an Ohnix admin discovers and matches that validation to a company
+  // BEFORE driving rut/archivos/confirmar for it.
+  app.get<{ Querystring: { page?: string; perPage?: string } }>(
+    "/api/v1/admin/firmapass/validations",
+    async (request, reply) => {
+      const { page, perPage } = request.query;
+      const result = await listPendingValidations({
+        page: page ? Number(page) : undefined,
+        perPage: perPage ? Number(perPage) : undefined,
+      });
+      return reply.send(result);
+    },
+  );
+
+  app.get("/api/v1/admin/firmapass/validations/nueva-solicitud", async (_request, reply) => {
+    const result = await getNextPendingValidation();
+    return reply.send(result);
   });
+
+  app.get<{ Params: { uuid: string } }>(
+    "/api/v1/admin/firmapass/validations/:uuid",
+    async (request, reply) => {
+      const result = await getValidationDetail(request.params.uuid);
+      return reply.send(result);
+    },
+  );
 
   app.post<{ Params: { id: string; uuid: string } }>(
     "/api/v1/admin/companies/:id/firmapass/validations/:uuid/rut",

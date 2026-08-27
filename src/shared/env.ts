@@ -54,4 +54,13 @@ export const env = {
   firmaPassEncryptionKey: process.env.FIRMAPASS_ENCRYPTION_KEY,
   /** Cron expression for how often pending FirmaPass certificate issuances are polled. Default: every 10 minutes. */
   firmaPassIssuanceCron: process.env.FIRMAPASS_ISSUANCE_CRON ?? "*/10 * * * *",
+  /**
+   * iTCycle's OWN FirmaPass "alianza" login key — ONE account shared across
+   * every provisioned company, not a per-company credential. A client's
+   * certificate purchase (made on FirmaPass's own site with iTCycle's
+   * coupon) auto-attaches to this alliance account, so a client never has a
+   * FirmaPass login key of their own to give us. See
+   * modules/firmapass/firmaPassIssuance.service.ts.
+   */
+  firmaPassAllianceLoginKey: process.env.FIRMAPASS_ALLIANCE_LOGIN_KEY,
 };

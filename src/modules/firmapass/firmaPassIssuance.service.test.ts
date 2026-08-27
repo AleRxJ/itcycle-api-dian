@@ -10,10 +10,16 @@ vi.mock("../../providers/firmapass/FirmaPassClient.js", () => ({
   })),
 }));
 
+// See firmaPassIssuance.job.test.ts for why this can't just be a plain
+// `process.env.X ??= ...` line.
+vi.mock("../../shared/env.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared/env.js")>();
+  return { ...actual, env: { ...actual.env, firmaPassAllianceLoginKey: "test-alliance-login-key" } };
+});
+
 import { prisma } from "../../infrastructure/prisma.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
-import { decryptSecret } from "../../shared/secretEncryption.js";
-import { confirmValidation, setFirmaPassLoginKey } from "./firmaPassIssuance.service.js";
+import { confirmValidation } from "./firmaPassIssuance.service.js";
 
 const TEST_NIT = "999000008";
 const TEST_DV = "1";
@@ -33,21 +39,11 @@ beforeAll(async () => {
     data: { name: "FirmaPass Issuance Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" },
   });
   companyId = company.id;
-  await setFirmaPassLoginKey(companyId, "test-login-key");
 });
 
 afterAll(async () => {
   await cleanup();
   await prisma.$disconnect();
-});
-
-describe("setFirmaPassLoginKey", () => {
-  it("stores the login key encrypted, and it round-trips via decryptSecret", async () => {
-    const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
-    expect(company.firmaPassLoginKeyCiphertext).toBeTruthy();
-    expect(company.firmaPassLoginKeyCiphertext).not.toContain("test-login-key");
-    expect(decryptSecret(company.firmaPassLoginKeyCiphertext as string)).toBe("test-login-key");
-  });
 });
 
 describe("confirmValidation", () => {

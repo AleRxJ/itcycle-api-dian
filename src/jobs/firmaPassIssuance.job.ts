@@ -7,7 +7,6 @@ import forge from "node-forge";
 import { prisma } from "../infrastructure/prisma.js";
 import { FirmaPassClient } from "../providers/firmapass/FirmaPassClient.js";
 import { createDefaultCertificateSecretStore } from "../shared/certificateStore.js";
-import { decryptSecret } from "../shared/secretEncryption.js";
 import { env } from "../shared/env.js";
 
 export interface FirmaPassIssuanceSummary {
@@ -44,7 +43,6 @@ export async function finalizePendingFirmaPassCertificates(
 
   const pending = await prisma.certificate.findMany({
     where: { provider: "firmapass", status: "INACTIVE", expiresAt: null },
-    include: { company: true },
   });
 
   const secretStore = createDefaultCertificateSecretStore();
@@ -52,10 +50,10 @@ export async function finalizePendingFirmaPassCertificates(
   for (const row of pending) {
     summary.checked += 1;
     try {
-      if (!row.company.firmaPassLoginKeyCiphertext) {
-        throw new Error(`Company ${row.companyId} has no FirmaPass login key configured`);
+      if (!env.firmaPassAllianceLoginKey) {
+        throw new Error("FIRMAPASS_ALLIANCE_LOGIN_KEY is not configured");
       }
-      const client = new FirmaPassClient(decryptSecret(row.company.firmaPassLoginKeyCiphertext));
+      const client = new FirmaPassClient(env.firmaPassAllianceLoginKey);
       const { data: detail } = await client.getCertificate(row.certificateIdentifier);
 
       if (detail.estado === "v" && detail.public_certificate_pem) {

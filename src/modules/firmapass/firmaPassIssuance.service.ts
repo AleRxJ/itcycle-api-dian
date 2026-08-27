@@ -3,21 +3,22 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../../infrastructure/prisma.js";
 import { FirmaPassClient } from "../../providers/firmapass/FirmaPassClient.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
-import { decryptSecret, encryptSecret } from "../../shared/secretEncryption.js";
+import { env } from "../../shared/env.js";
 
-export async function setFirmaPassLoginKey(companyId: string, loginKey: string): Promise<void> {
-  await prisma.company.update({
-    where: { id: companyId },
-    data: { firmaPassLoginKeyCiphertext: encryptSecret(loginKey) },
-  });
-}
-
-async function getClientForCompany(companyId: string): Promise<FirmaPassClient> {
-  const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
-  if (!company.firmaPassLoginKeyCiphertext) {
-    throw new Error(`Company ${companyId} has no FirmaPass login key configured`);
+/**
+ * iTCycle's own FirmaPass "alianza" account — ONE login key shared across
+ * every provisioned company, not a per-company credential. Per FirmaPass:
+ * a client's certificate purchase (made on FirmaPass's own site with
+ * iTCycle's coupon) auto-attaches to this alliance account, so a client
+ * never has — and is never asked for — a FirmaPass login key of their own.
+ * Company.firmaPassLoginKeyCiphertext (kept in the schema, no longer
+ * written) is the old, incorrect per-company model this replaces.
+ */
+function getAllianceClient(): FirmaPassClient {
+  if (!env.firmaPassAllianceLoginKey) {
+    throw new Error("FIRMAPASS_ALLIANCE_LOGIN_KEY is not configured");
   }
-  return new FirmaPassClient(decryptSecret(company.firmaPassLoginKeyCiphertext));
+  return new FirmaPassClient(env.firmaPassAllianceLoginKey);
 }
 
 export interface UploadRutParams {
@@ -28,7 +29,7 @@ export interface UploadRutParams {
 }
 
 export async function uploadRut(params: UploadRutParams) {
-  const client = await getClientForCompany(params.companyId);
+  const client = getAllianceClient();
   return client.uploadRut(params.validationUuid, {
     rutBase64: params.rutBase64,
     identificacionRepresentanteLegal: params.identificacionRepresentanteLegal,
@@ -43,8 +44,27 @@ export interface UploadArchivoParams {
 }
 
 export async function uploadArchivo(params: UploadArchivoParams) {
-  const client = await getClientForCompany(params.companyId);
+  const client = getAllianceClient();
   return client.uploadArchivo(params.validationUuid, { type: params.type, fileBase64: params.fileBase64 });
+}
+
+export interface ListPendingValidationsParams {
+  page?: number;
+  perPage?: number;
+}
+
+/** Every validation the alliance account can see (across all clients who bought with the coupon), for an admin to browse and match to an Ohnix company. */
+export async function listPendingValidations(params: ListPendingValidationsParams = {}) {
+  return getAllianceClient().listValidations(params);
+}
+
+/** FIFO convenience: the oldest validation still waiting on document upload. */
+export async function getNextPendingValidation() {
+  return getAllianceClient().getNuevaSolicitud();
+}
+
+export async function getValidationDetail(validationUuid: string) {
+  return getAllianceClient().getValidationDetail(validationUuid);
 }
 
 export interface ConfirmValidationParams {
@@ -74,7 +94,7 @@ export interface ConfirmValidationResult {
  * here or in any catch block downstream.
  */
 export async function confirmValidation(params: ConfirmValidationParams): Promise<ConfirmValidationResult> {
-  const client = await getClientForCompany(params.companyId);
+  const client = getAllianceClient();
   const response = await client.confirmar(params.validationUuid);
 
   if (response.private_key_pem === null) {

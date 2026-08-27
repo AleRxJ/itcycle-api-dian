@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../../infrastructure/prisma.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { generateApiKey } from "../../shared/apiKeyAuth.js";
+import { env } from "../../shared/env.js";
 
 export interface CreateCompanyParams {
   name: string;
@@ -202,14 +203,18 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
 
 /** Read-only snapshot for Ohnix's admin UI — no schema change, just a projection of existing columns. */
 export async function getFirmaPassStatus(companyId: string): Promise<FirmaPassStatus> {
-  const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
   const certificates = await prisma.certificate.findMany({
     where: { companyId, provider: "firmapass" },
     orderBy: { createdAt: "desc" },
   });
 
+  // loginKeySet now reflects iTCycle's shared FirmaPass "alianza" account
+  // (env.firmaPassAllianceLoginKey), not a per-company credential — see
+  // modules/firmapass/firmaPassIssuance.service.ts. Same value for every
+  // company; kept in the per-company response shape so Ohnix's existing UI
+  // doesn't need a separate call to learn it.
   return {
-    loginKeySet: Boolean(company.firmaPassLoginKeyCiphertext),
+    loginKeySet: Boolean(env.firmaPassAllianceLoginKey),
     certificates: certificates.map((c) => ({
       id: c.id,
       certificateIdentifier: c.certificateIdentifier,

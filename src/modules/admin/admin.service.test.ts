@@ -1,4 +1,14 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// A plain `process.env.X ??= ...` here doesn't reliably beat env.ts's own
+// module-eval-time read (ESM hoists this file's imports - including the
+// transitive import of env.js - ahead of its own top-level statements,
+// regardless of source order) - vi.mock is the one mechanism guaranteed to
+// run before env.js is evaluated.
+vi.mock("../../shared/env.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../shared/env.js")>();
+  return { ...actual, env: { ...actual.env, firmaPassAllianceLoginKey: "test-alliance-login-key" } };
+});
 
 import { prisma } from "../../infrastructure/prisma.js";
 import { hashApiKey } from "../../shared/apiKeyAuth.js";
@@ -99,14 +109,15 @@ describe("admin provisioning", () => {
     expect(stored.certificateIdentifier).toBe("cert-123");
   });
 
-  it("getFirmaPassStatus reports loginKeySet and lists only firmapass-provider certificates", async () => {
+  it("getFirmaPassStatus reports loginKeySet from the shared alliance config and lists only firmapass-provider certificates", async () => {
     const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
 
+    // loginKeySet reflects env.FIRMAPASS_ALLIANCE_LOGIN_KEY (set once above,
+    // for every company) - not a per-company column anymore.
     const beforeKey = await getFirmaPassStatus(company.id);
-    expect(beforeKey.loginKeySet).toBe(false);
+    expect(beforeKey.loginKeySet).toBe(true);
     expect(beforeKey.certificates).toEqual([]);
 
-    await prisma.company.update({ where: { id: company.id }, data: { firmaPassLoginKeyCiphertext: "fake-ciphertext" } });
     await prisma.certificate.create({
       data: {
         companyId: company.id,

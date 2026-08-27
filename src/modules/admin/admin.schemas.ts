@@ -40,10 +40,6 @@ export const CreateApiKeyBodySchema = z.object({
   label: z.string(),
 });
 
-export const SetFirmaPassLoginKeyBodySchema = z.object({
-  loginKey: z.string(),
-});
-
 export const FirmaPassUploadRutBodySchema = z.object({
   rutBase64: z.string(),
   identificacionRepresentanteLegal: z.string().optional(),
