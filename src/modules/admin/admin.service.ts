@@ -4,6 +4,9 @@ import { prisma } from "../../infrastructure/prisma.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { generateApiKey } from "../../shared/apiKeyAuth.js";
 import { env } from "../../shared/env.js";
+import { loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
+import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
+import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 
 export interface CreateCompanyParams {
   name: string;
@@ -238,4 +241,87 @@ export async function createApiKeyForCompany(params: CreateApiKeyParams) {
   });
   // The only place the raw key is ever returned — callers must persist it immediately (see docs/dian/sandbox-tests.md).
   return { rawKey };
+}
+
+export type RefreshableDocumentType = Extract<NumberedDocumentType, "01" | "91" | "92">;
+
+export interface RefreshDocumentStatusParams {
+  companyId: string;
+  documentType: RefreshableDocumentType;
+  id: string;
+}
+
+/**
+ * Resolves the REAL final DIAN verdict for a document left in the "SENT"
+ * intermediate status by an async send (SendBillAsync/SendTestSetAsync) —
+ * see documentSend.service.ts's computeSentStatusFields for why that status
+ * exists instead of an immediate ACCEPTED/REJECTED guess.
+ *
+ * Purely additive and safe to call repeatedly: a document not in "SENT" is
+ * already terminal (ACCEPTED/REJECTED/CONTINGENCY/ERROR) and is returned
+ * unchanged without any DIAN call, so polling this endpoint on a loop from
+ * Ohnix never risks re-querying DIAN for documents that don't need it.
+ */
+export async function refreshDocumentStatus(params: RefreshDocumentStatusParams) {
+  const record = await findDocumentRecord(params.documentType, params.companyId, params.id);
+  if (!record) {
+    throw new Error(`Document ${params.id} (type ${params.documentType}) not found for company ${params.companyId}`);
+  }
+  if (record.status !== "SENT") {
+    // Already terminal (or never sent) - nothing to refresh.
+    return record;
+  }
+  if (!record.trackId) {
+    throw new Error(`Document ${params.id} is SENT but has no trackId — cannot query DIAN status.`);
+  }
+
+  const secretStore = createDefaultCertificateSecretStore();
+  const { config } = await loadDianConfig({ companyId: params.companyId, documentType: params.documentType }, secretStore);
+  const provider = env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
+
+  const status = await provider.getStatusZip(record.trackId);
+
+  if (status.statusCode === "66") {
+    // Still processing on DIAN's side - not terminal yet, just refresh the description.
+    return updateDocumentRecord(params.documentType, record.id, { statusDescription: status.statusDescription });
+  }
+
+  const now = new Date();
+  return updateDocumentRecord(params.documentType, record.id, {
+    status: status.isValid ? "ACCEPTED" : "REJECTED",
+    statusDescription: status.statusDescription,
+    acceptedAt: status.isValid ? now : null,
+    rejectedAt: status.isValid ? null : now,
+    errorMessage: status.errors?.map((e) => e.description).join("; ") || null,
+  });
+}
+
+function findDocumentRecord(documentType: RefreshableDocumentType, companyId: string, id: string) {
+  switch (documentType) {
+    case "01":
+      return prisma.invoice.findFirst({ where: { id, companyId } });
+    case "91":
+      return prisma.creditNote.findFirst({ where: { id, companyId } });
+    case "92":
+      return prisma.debitNote.findFirst({ where: { id, companyId } });
+  }
+}
+
+interface DocumentStatusUpdate {
+  status?: "ACCEPTED" | "REJECTED";
+  statusDescription: string | null;
+  acceptedAt?: Date | null;
+  rejectedAt?: Date | null;
+  errorMessage?: string | null;
+}
+
+function updateDocumentRecord(documentType: RefreshableDocumentType, id: string, data: DocumentStatusUpdate) {
+  switch (documentType) {
+    case "01":
+      return prisma.invoice.update({ where: { id }, data });
+    case "91":
+      return prisma.creditNote.update({ where: { id }, data });
+    case "92":
+      return prisma.debitNote.update({ where: { id }, data });
+  }
 }

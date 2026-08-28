@@ -8,7 +8,7 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
-import { reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
+import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
@@ -129,12 +129,10 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
         prefix: numbering.prefix,
         cufe: document.uuid,
         xmlReference,
-        status: response.isValid ? "ACCEPTED" : "REJECTED",
         simulated,
         issuedAt: new Date(),
         sentAt: new Date(),
-        acceptedAt: response.isValid ? new Date() : null,
-        errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
+        ...computeSentStatusFields(response),
       },
     });
   } catch (error) {
@@ -188,11 +186,9 @@ export async function retryDebitNoteSend(
   return await prisma.debitNote.update({
     where: { id: debitNote.id },
     data: {
-      status: response.isValid ? "ACCEPTED" : "REJECTED",
       simulated,
       sentAt: new Date(),
-      acceptedAt: response.isValid ? new Date() : null,
-      errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
+      ...computeSentStatusFields(response),
     },
   });
 }

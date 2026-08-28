@@ -187,6 +187,14 @@ model Invoice {
   prefix               String?
   cufe                 String?
   status               InvoiceStatus @default(PENDING)
+  /// ZipKey/UUID DIAN returns for an async send (SendBillAsync/
+  /// SendTestSetAsync) - null for sync sends, which never need a later
+  /// getStatusZip lookup. See computeSentStatusFields in
+  /// documentSend.service.ts.
+  trackId               String?
+  /// Latest human-readable status text from DIAN (send ack or a later
+  /// getStatusZip refresh) - not authoritative on its own, `status` is.
+  statusDescription     String?
   /// True when `send` went through SimulatedDianProvider instead of a real
   /// DIAN connection (DIAN_SIMULATION_MODE). ACCEPTED + simulated=true is
   /// NOT a real DIAN acceptance — see docs/dian/simulation.md.
@@ -230,6 +238,9 @@ model CreditNote {
   discrepancyResponseCode String // DIAN correction code, e.g. "2" = anulacion
   discrepancyDescription  String
   status                  InvoiceStatus @default(PENDING)
+  /// See Invoice.trackId/statusDescription — same meaning.
+  trackId                 String?
+  statusDescription       String?
   /// See Invoice.simulated — same meaning, same caveat (docs/dian/simulation.md).
   simulated               Boolean       @default(false)
   xmlReference            String?
@@ -269,6 +280,9 @@ model DebitNote {
   discrepancyResponseCode String // DIAN correction code, e.g. "1" = intereses
   discrepancyDescription  String
   status                  InvoiceStatus @default(PENDING)
+  /// See Invoice.trackId/statusDescription — same meaning.
+  trackId                 String?
+  statusDescription       String?
   simulated               Boolean       @default(false)
   xmlReference            String?
   dianResponseReference   String?

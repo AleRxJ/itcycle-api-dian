@@ -39,3 +39,47 @@ export async function sendWithContingencyHandling(
 export function reconstructDocumentForResend(signedXml: string, documentNumber: string, uuid: string): DocumentResult {
   return { xml: signedXml, signedXml, documentNumber, uuid };
 }
+
+export interface SentStatusFields {
+  status: "SENT" | "ACCEPTED" | "REJECTED";
+  trackId: string | null;
+  statusDescription: string | null;
+  acceptedAt: Date | null;
+  errorMessage: string | null;
+}
+
+/**
+ * Computes the status fields to persist from a "sent" SendOutcome.
+ *
+ * `SendBillSync` responses have no `trackId` and already carry DIAN's real
+ * verdict in `isValid` — those resolve immediately to ACCEPTED/REJECTED,
+ * exactly as before this function existed.
+ *
+ * `SendBillAsync`/`SendTestSetAsync` responses DO have a `trackId` — their
+ * `isValid` on THIS response is only DIAN's acknowledgment that the document
+ * was received for processing, not the final validation result (dian-kit.ts
+ * documents this: the real result requires a later `getStatusZip(trackId)`
+ * call). Treating that ack as final was a latent bug: a batch of async sends
+ * could get recorded as "accepted" without DIAN ever having validated them.
+ * These now land in the intermediate "SENT" status with `trackId` persisted;
+ * admin.service.ts's `refreshDocumentStatus` polls `getStatusZip` later to
+ * resolve the real ACCEPTED/REJECTED verdict.
+ */
+export function computeSentStatusFields(response: DianSendResponse): SentStatusFields {
+  if (response.trackId) {
+    return {
+      status: "SENT",
+      trackId: response.trackId,
+      statusDescription: response.statusDescription ?? null,
+      acceptedAt: null,
+      errorMessage: null,
+    };
+  }
+  return {
+    status: response.isValid ? "ACCEPTED" : "REJECTED",
+    trackId: null,
+    statusDescription: response.statusDescription ?? null,
+    acceptedAt: response.isValid ? new Date() : null,
+    errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
+  };
+}

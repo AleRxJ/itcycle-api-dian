@@ -181,6 +181,36 @@ describe("createInvoice", () => {
     expect(result.errorMessage).toContain("boom");
   });
 
+  it("lands in SENT (not ACCEPTED) with trackId persisted for an async send, since the ack isn't DIAN's final verdict", async () => {
+    const createInvoiceMock = vi
+      .fn()
+      .mockResolvedValue({ xml: "<xml/>", signedXml: "<signed/>", uuid: "cufe-async-1", documentNumber: "TSTI-ASYNC-1" });
+    // Async sends (SendTestSetAsync/SendBillAsync) return a trackId — isValid:true
+    // here is only an acknowledgment, not the real result (see computeSentStatusFields).
+    const send = vi.fn().mockResolvedValue({
+      isValid: true,
+      statusCode: "01",
+      statusDescription: "Procesando",
+      trackId: "track-123",
+      errors: [],
+      rawResponse: "",
+    });
+
+    const result = await createInvoice(
+      { companyId, internalReference: "ref-async-1", invoice: invoiceInput(), send: { method: "SendTestSetAsync", testSetId: "test-set-1" } },
+      {
+        secretStore: fakeSecretStore,
+        xmlStore: fakeXmlStore(),
+        createProvider: () => fakeProvider({ createInvoice: createInvoiceMock, send }),
+      },
+    );
+
+    expect(result.status).toBe("SENT");
+    expect(result.trackId).toBe("track-123");
+    expect(result.acceptedAt).toBeNull();
+    expect(result.errorMessage).toBeNull();
+  });
+
   it("marks the invoice ERROR and rethrows when the provider fails", async () => {
     const createInvoiceMock = vi.fn().mockRejectedValue(new Error("network down"));
 

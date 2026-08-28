@@ -15,8 +15,10 @@ import {
   createNumberingResolution,
   getDianReadiness,
   getFirmaPassStatus,
+  refreshDocumentStatus,
   setDianConfiguration,
   uploadCertificate,
+  type RefreshableDocumentType,
 } from "./admin.service.js";
 import {
   confirmValidation,
@@ -147,4 +149,31 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const readiness = await getDianReadiness(request.params.id);
     return reply.code(200).send(readiness);
   });
+
+  // Resolves the real DIAN verdict for a document an async send (SendBillAsync/
+  // SendTestSetAsync) left in the intermediate "SENT" status - see
+  // documentSend.service.ts's computeSentStatusFields and
+  // admin.service.ts's refreshDocumentStatus. Safe to call repeatedly:
+  // already-terminal documents are returned unchanged without a DIAN call.
+  const REFRESHABLE_TYPES: RefreshableDocumentType[] = ["01", "91", "92"];
+  app.post<{ Params: { id: string; documentType: string; docId: string } }>(
+    "/api/v1/admin/companies/:id/documents/:documentType/:docId/refresh-status",
+    async (request, reply) => {
+      const { documentType } = request.params;
+      if (!REFRESHABLE_TYPES.includes(documentType as RefreshableDocumentType)) {
+        return reply.code(400).send({ error: "invalid_document_type", message: `documentType must be one of ${REFRESHABLE_TYPES.join(", ")}` });
+      }
+      try {
+        const record = await refreshDocumentStatus({
+          companyId: request.params.id,
+          documentType: documentType as RefreshableDocumentType,
+          id: request.params.docId,
+        });
+        return reply.send(record);
+      } catch (error) {
+        request.log.error(error);
+        return reply.code(502).send({ error: "dian_status_refresh_failed", message: error instanceof Error ? error.message : String(error) });
+      }
+    },
+  );
 }
