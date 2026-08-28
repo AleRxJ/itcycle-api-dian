@@ -18,7 +18,7 @@ function getAllianceClient(): FirmaPassClient {
   if (!env.firmaPassAllianceLoginKey) {
     throw new Error("FIRMAPASS_ALLIANCE_LOGIN_KEY is not configured");
   }
-  return new FirmaPassClient(env.firmaPassAllianceLoginKey);
+  return new FirmaPassClient(env.firmaPassAllianceLoginKey, env.firmaPassBaseUrl);
 }
 
 export interface UploadRutParams {

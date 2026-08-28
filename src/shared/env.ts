@@ -63,4 +63,12 @@ export const env = {
    * modules/firmapass/firmaPassIssuance.service.ts.
    */
   firmaPassAllianceLoginKey: process.env.FIRMAPASS_ALLIANCE_LOGIN_KEY,
+  /**
+   * FirmaPass API host. Defaults to production (identidad.firmapass.com).
+   * FirmaPass's sandbox environment (identidad-sandbox.firmapass.com) uses a
+   * separate account and login key from production - never mix a sandbox
+   * key with the production URL or vice versa (they don't authenticate
+   * against each other). Override for local development only.
+   */
+  firmaPassBaseUrl: process.env.FIRMAPASS_BASE_URL || "https://identidad.firmapass.com",
 };

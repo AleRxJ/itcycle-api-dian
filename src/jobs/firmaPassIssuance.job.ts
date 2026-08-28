@@ -53,7 +53,7 @@ export async function finalizePendingFirmaPassCertificates(
       if (!env.firmaPassAllianceLoginKey) {
         throw new Error("FIRMAPASS_ALLIANCE_LOGIN_KEY is not configured");
       }
-      const client = new FirmaPassClient(env.firmaPassAllianceLoginKey);
+      const client = new FirmaPassClient(env.firmaPassAllianceLoginKey, env.firmaPassBaseUrl);
       const { data: detail } = await client.getCertificate(row.certificateIdentifier);
 
       if (detail.estado === "v" && detail.public_certificate_pem) {
