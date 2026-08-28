@@ -58,15 +58,18 @@ export interface FirmaPassGetCertificateResponse {
 
 /**
  * Verified against FirmaPass's own Postman collection (not paraphrased).
- * There is no email field anywhere on a validation - `nombre` (a
- * human-composed label, e.g. "Firma Factura Electronica ACME SAS") is the
- * only identifying field, so matching a validation to an Ohnix company is a
- * human/admin judgment call, not an automatic lookup. `[key: string]:
- * unknown` stays as a safety net for anything not modeled here.
+ * `owner_email` (the FirmaPass account's email) and `order_number` (set once
+ * a real purchase, as opposed to this alliance's coupon-attached test/manual
+ * validations, carries one) are both real identifying fields on top of
+ * `nombre` - `order_number` is also a valid filter on GET
+ * /api/validaciones-identidad (see FirmaPassClient.listValidations). `[key:
+ * string]: unknown` stays as a safety net for anything not modeled here.
  */
 export interface FirmaPassValidationSummary {
   uuid: string;
   nombre: string;
+  owner_email: string | null;
+  order_number: string | null;
   estado: string;
   estado_descripcion: string;
   categoria: string;
@@ -138,7 +141,22 @@ export class FirmaPassClient {
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`FirmaPass request failed (${response.status} ${path}): ${body}`);
+      // FirmaPass's own error responses are clean JSON ({"message": "No fue
+      // posible identificar la fecha de generación..."}) - the RUT/document
+      // upload endpoints in particular return specific, actionable validation
+      // messages that should reach the end user verbatim (Ohnix is standing
+      // in for FirmaPass's own "Carga de Documentos de Identidad" step, so
+      // these need to be exactly as consistent/helpful as FirmaPass's own
+      // site). Only fall back to the generic wrapped form when the body isn't
+      // parseable JSON with a message/error field.
+      let cleanMessage: string | undefined;
+      try {
+        const parsed = JSON.parse(body);
+        cleanMessage = typeof parsed?.message === "string" ? parsed.message : typeof parsed?.error === "string" ? parsed.error : undefined;
+      } catch {
+        // Non-JSON body - no clean message to extract.
+      }
+      throw new Error(cleanMessage || `FirmaPass request failed (${response.status} ${path}): ${body}`);
     }
 
     return (await response.json()) as T;
@@ -181,14 +199,19 @@ export class FirmaPassClient {
   }
 
   /**
-   * Every validation visible to this login key, newest first. `perPage` is
-   * the only real query param FirmaPass documents (integer 1-100, defaults
-   * to 20) — there is no documented `page` param despite `meta` echoing
-   * back current_page/last_page.
+   * Every validation visible to this login key, newest first. `perPage`
+   * (integer 1-100, defaults to 20) and `orderNumber` are the two documented
+   * query params — there is no documented `page` param despite `meta`
+   * echoing back current_page/last_page. `orderNumber` does an exact match
+   * against `order_number` (only set once a real order/purchase, not this
+   * alliance's coupon-attached test validations, has one) - the reliable way
+   * to look up a specific client's validation once the queue outgrows what
+   * `perPage` alone can return in one page.
    */
-  async listValidations(params: { perPage?: number } = {}): Promise<FirmaPassListValidationsResponse> {
+  async listValidations(params: { perPage?: number; orderNumber?: string } = {}): Promise<FirmaPassListValidationsResponse> {
     const query = new URLSearchParams();
     if (params.perPage) query.set("per_page", String(params.perPage));
+    if (params.orderNumber) query.set("order_number", params.orderNumber);
     const qs = query.toString();
     return this.request(`/api/validaciones-identidad${qs ? `?${qs}` : ""}`, { method: "GET" });
   }

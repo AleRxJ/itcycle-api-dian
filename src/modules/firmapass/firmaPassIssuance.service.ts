@@ -50,9 +50,11 @@ export async function uploadArchivo(params: UploadArchivoParams) {
 
 export interface ListPendingValidationsParams {
   perPage?: number;
+  /** Exact match against a real purchase's order number - see FirmaPassClient.listValidations. */
+  orderNumber?: string;
 }
 
-/** Every validation the alliance account can see (across all clients who bought with the coupon), for an admin to browse and match to an Ohnix company by its `nombre` label — FirmaPass exposes no email/identifier field to match on automatically. */
+/** Every validation the alliance account can see (across all clients who bought with the coupon), for an admin to browse/match to an Ohnix company - by `owner_email`/`order_number` when a real purchase set them, otherwise by the generic `nombre` label. */
 export async function listPendingValidations(params: ListPendingValidationsParams = {}) {
   return getAllianceClient().listValidations(params);
 }
