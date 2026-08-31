@@ -207,6 +207,14 @@ model Invoice {
   rejectedAt            DateTime?
   errorCode             String?
   errorMessage          String?
+  /// The `send.testSetId` this document was submitted under, if any (set
+  /// while the company's DIAN habilitación is "En proceso" - see
+  /// buildItcycleSendOptions on Ohnix's side). Null once habilitación is
+  /// approved and issuance falls back to the production method. Lets an
+  /// admin pull every document sent under a given qualification round and
+  /// cross-check it against DIAN's own required-scenarios checklist (which
+  /// only DIAN's own habilitación portal shows - never hardcoded here).
+  testSetId             String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -251,6 +259,8 @@ model CreditNote {
   rejectedAt              DateTime?
   errorCode               String?
   errorMessage            String?
+  /// See Invoice.testSetId — same meaning.
+  testSetId               String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -292,6 +302,8 @@ model DebitNote {
   rejectedAt              DateTime?
   errorCode               String?
   errorMessage            String?
+  /// See Invoice.testSetId — same meaning.
+  testSetId               String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -358,6 +370,8 @@ model SupportDocument {
   rejectedAt             DateTime?
   errorCode              String?
   errorMessage           String?
+  /// See Invoice.testSetId — same meaning.
+  testSetId              String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

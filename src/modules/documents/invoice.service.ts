@@ -73,6 +73,7 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
       numberingId: numbering.id,
       certificateId,
       status: "PROCESSING",
+      testSetId: params.send?.testSetId ?? null,
     },
   });
 

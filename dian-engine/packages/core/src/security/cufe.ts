@@ -34,8 +34,15 @@ export function sha384(input: string): string {
 
 /**
  * Extracts the total tax amount for a specific tax code from the document's
- * tax totals. Iterates through all `TaxTotal` entries and their subtotals,
- * returning the amount for the first matching tax scheme code.
+ * tax totals, summing every matching subtotal across all `TaxTotal` entries.
+ *
+ * The CUFE/CUDE formula has exactly one slot per tax type (ValImp1/2/3, see
+ * {@link CUFE_TAX_ORDER}) - a document with multiple rates of the SAME tax
+ * type (e.g. 19% and 5% IVA lines on one invoice) still needs a single
+ * aggregate value for that slot. Returning only the first match here used to
+ * silently drop every other rate's amount from the hash input, producing a
+ * CUFE that doesn't match what DIAN itself computes from the same XML
+ * (CAD06/FAD06-class rejection) as soon as an invoice mixed rates.
  *
  * Returns `0` if the tax code is not present in the document, which is the
  * correct behavior for the CUFE/CUDE formula (absent taxes contribute zero
@@ -44,17 +51,18 @@ export function sha384(input: string): string {
  * @param doc - The DIAN document containing tax totals to search
  * @param taxCode - The tax scheme code to look for (e.g., "01" for IVA,
  *   "04" for INC, "03" for ICA)
- * @returns The tax amount for the matching code, or `0` if not found
+ * @returns The summed tax amount for the matching code, or `0` if not found
  */
 function extractTaxAmount(doc: DianDocument, taxCode: string): number {
+  let total = 0;
   for (const tt of doc.taxTotals) {
     for (const sub of tt.subtotals) {
       if (sub.taxScheme.code === taxCode) {
-        return sub.taxAmount;
+        total += sub.taxAmount;
       }
     }
   }
-  return 0;
+  return total;
 }
 
 /**

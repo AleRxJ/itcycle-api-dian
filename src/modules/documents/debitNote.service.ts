@@ -76,6 +76,7 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
       discrepancyResponseCode: params.discrepancyResponse.responseCode,
       discrepancyDescription: params.discrepancyResponse.description,
       status: "PROCESSING",
+      testSetId: params.send?.testSetId ?? null,
     },
   });
 

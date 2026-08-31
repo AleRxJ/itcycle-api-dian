@@ -15,6 +15,7 @@ import {
   createNumberingResolution,
   getDianReadiness,
   getFirmaPassStatus,
+  listTestSubmissions,
   refreshDocumentStatus,
   setDianConfiguration,
   uploadCertificate,
@@ -175,6 +176,18 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         request.log.error(error);
         return reply.code(502).send({ error: "dian_status_refresh_failed", message: error instanceof Error ? error.message : String(error) });
       }
+    },
+  );
+
+  // Everything sent under a DIAN habilitación round (or, with no
+  // ?testSetId, everything ever sent under any round) - see
+  // admin.service.ts's listTestSubmissions for why this doesn't hardcode
+  // DIAN's own required-scenarios checklist.
+  app.get<{ Params: { id: string }; Querystring: { testSetId?: string } }>(
+    "/api/v1/admin/companies/:id/test-submissions",
+    async (request, reply) => {
+      const submissions = await listTestSubmissions(request.params.id, request.query.testSetId || undefined);
+      return reply.send({ data: submissions });
     },
   );
 }

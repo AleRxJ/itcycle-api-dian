@@ -80,6 +80,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
       discrepancyResponseCode: params.discrepancyResponse.responseCode,
       discrepancyDescription: params.discrepancyResponse.description,
       status: "PROCESSING",
+      testSetId: params.send?.testSetId ?? null,
     },
   });
 

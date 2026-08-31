@@ -79,6 +79,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
       numberingId: numbering.id,
       certificateId,
       status: "PROCESSING",
+      testSetId: params.send?.testSetId ?? null,
     },
   });
 

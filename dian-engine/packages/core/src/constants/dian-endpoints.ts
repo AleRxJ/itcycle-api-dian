@@ -14,6 +14,8 @@ export const DianEndpoint = {
     SERVICE: "https://vpfe.dian.gov.co/WcfDianCustomerServices.svc",
     /** DIAN production WSDL descriptor for service discovery */
     WSDL: "https://vpfe.dian.gov.co/WcfDianCustomerServices.svc?wsdl",
+    /** DIAN production catalog URL for document verification */
+    CATALOG: "https://catalogo-vpfe.dian.gov.co/",
   },
   /** Sandbox (habilitacion) environment endpoints for testing and certification */
   SANDBOX: {

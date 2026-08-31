@@ -325,3 +325,44 @@ function updateDocumentRecord(documentType: RefreshableDocumentType, id: string,
       return prisma.debitNote.update({ where: { id }, data });
   }
 }
+
+export interface TestSubmission {
+  documentType: "01" | "91" | "92" | "05";
+  id: string;
+  internalReference: string;
+  documentNumber: string | null;
+  testSetId: string | null;
+  status: string;
+  errorMessage: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Every invoice/credit-note/debit-note/support-document a company has sent,
+ * across all four document types, newest first — optionally narrowed to one
+ * `testSetId`. There is no hardcoded checklist of what DIAN requires for a
+ * given habilitación round here (that lives only on DIAN's own habilitación
+ * portal, and changes per-round) - this exists so an admin can pull "here is
+ * everything we actually submitted under testSetId X, and its outcome" and
+ * cross-check it against that portal by hand, instead of having no record
+ * at all of what was tried.
+ */
+export async function listTestSubmissions(companyId: string, testSetId?: string): Promise<TestSubmission[]> {
+  const where = testSetId ? { companyId, testSetId } : { companyId, testSetId: { not: null } };
+
+  const [invoices, creditNotes, debitNotes, supportDocuments] = await Promise.all([
+    prisma.invoice.findMany({ where }),
+    prisma.creditNote.findMany({ where }),
+    prisma.debitNote.findMany({ where }),
+    prisma.supportDocument.findMany({ where }),
+  ]);
+
+  const submissions: TestSubmission[] = [
+    ...invoices.map((r) => ({ documentType: "01" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.invoiceNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
+    ...creditNotes.map((r) => ({ documentType: "91" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.noteNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
+    ...debitNotes.map((r) => ({ documentType: "92" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.noteNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
+    ...supportDocuments.map((r) => ({ documentType: "05" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.documentNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
+  ];
+
+  return submissions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}

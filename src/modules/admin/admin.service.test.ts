@@ -17,6 +17,7 @@ import {
   createCompany,
   createNumberingResolution,
   getFirmaPassStatus,
+  listTestSubmissions,
   setDianConfiguration,
   uploadCertificate,
 } from "./admin.service.js";
@@ -27,6 +28,10 @@ const TEST_DV = "1";
 async function cleanup(): Promise<void> {
   const company = await prisma.company.findUnique({ where: { nit_dv: { nit: TEST_NIT, dv: TEST_DV } } });
   if (!company) return;
+  await prisma.creditNote.deleteMany({ where: { companyId: company.id } });
+  await prisma.debitNote.deleteMany({ where: { companyId: company.id } });
+  await prisma.supportDocument.deleteMany({ where: { companyId: company.id } });
+  await prisma.invoice.deleteMany({ where: { companyId: company.id } });
   await prisma.apiKey.deleteMany({ where: { companyId: company.id } });
   await prisma.certificate.deleteMany({ where: { companyId: company.id } });
   await prisma.numberingResolution.deleteMany({ where: { companyId: company.id } });
@@ -153,5 +158,30 @@ describe("admin provisioning", () => {
     const stored = await prisma.apiKey.findUnique({ where: { keyHash: hashApiKey(rawKey) } });
     expect(stored?.companyId).toBe(company.id);
     expect(stored?.label).toBe("admin-test");
+  });
+
+  it("listTestSubmissions filters by testSetId and omits documents sent outside habilitación", async () => {
+    const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+
+    const roundOne = await prisma.invoice.create({
+      data: { companyId: company.id, internalReference: "test-round-1", testSetId: "round-1", status: "ACCEPTED", invoiceNumber: "SETP1" },
+    });
+    const roundTwo = await prisma.supportDocument.create({
+      data: { companyId: company.id, internalReference: "test-round-2", testSetId: "round-2", status: "ERROR" },
+    });
+    await prisma.invoice.create({
+      data: { companyId: company.id, internalReference: "prod-1", testSetId: null, status: "ACCEPTED", invoiceNumber: "PROD1" },
+    });
+
+    const roundOneOnly = await listTestSubmissions(company.id, "round-1");
+    expect(roundOneOnly).toHaveLength(1);
+    expect(roundOneOnly[0].id).toBe(roundOne.id);
+    expect(roundOneOnly[0].documentType).toBe("01");
+
+    const everyTestSubmission = await listTestSubmissions(company.id);
+    const ids = everyTestSubmission.map((s) => s.id);
+    expect(ids).toContain(roundOne.id);
+    expect(ids).toContain(roundTwo.id);
+    expect(ids).toHaveLength(2); // the null-testSetId production invoice must not show up here
   });
 });

@@ -122,10 +122,22 @@ export async function loadDianConfig(
  * never reused: if the caller's request later turns out to be a duplicate
  * (idempotent replay), the claimed number is simply skipped, which DIAN
  * permits (gaps are fine, reuse is not).
+ *
+ * Compare-and-swap loop, not a plain read-then-write inside a transaction:
+ * under Postgres's default READ COMMITTED isolation, two concurrent claims
+ * could both read the same `currentNumber` before either commits its write,
+ * handing out the SAME document number twice - a real DIAN numbering
+ * violation (duplicate NumFac, mismatched CUFE input), not just an app-level
+ * bug. Conditioning the update on `currentNumber: claimed` makes each
+ * attempt atomic: if another request already won the race and committed its
+ * increment, this WHERE clause matches nothing, `count` comes back 0, and
+ * the loop retries against the now-current value instead of silently
+ * overwriting a number someone else already claimed.
  */
 export async function claimNextNumber(numberingId: string): Promise<{ documentId: string; number: number }> {
-  return prisma.$transaction(async (tx) => {
-    const numbering = await tx.numberingResolution.findUniqueOrThrow({ where: { id: numberingId } });
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const numbering = await prisma.numberingResolution.findUniqueOrThrow({ where: { id: numberingId } });
     if (numbering.currentNumber > numbering.endNumber) {
       throw new Error(
         `NumberingResolution ${numbering.id} is exhausted (range ${numbering.startNumber}-${numbering.endNumber}). ` +
@@ -134,11 +146,16 @@ export async function claimNextNumber(numberingId: string): Promise<{ documentId
     }
 
     const claimed = numbering.currentNumber;
-    await tx.numberingResolution.update({
-      where: { id: numberingId },
+    const result = await prisma.numberingResolution.updateMany({
+      where: { id: numberingId, currentNumber: claimed },
       data: { currentNumber: claimed + 1 },
     });
-
-    return { documentId: `${numbering.prefix}${claimed}`, number: claimed };
-  });
+    if (result.count === 1) {
+      return { documentId: `${numbering.prefix}${claimed}`, number: claimed };
+    }
+    // Lost the race against a concurrent claim - retry against the fresh value.
+  }
+  throw new Error(
+    `Could not claim a number for NumberingResolution ${numberingId} after ${MAX_ATTEMPTS} attempts (high concurrent contention).`,
+  );
 }

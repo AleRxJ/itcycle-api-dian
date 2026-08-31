@@ -1,7 +1,8 @@
 import { create } from "xmlbuilder2";
 import type { XMLBuilder } from "xmlbuilder2/lib/interfaces.js";
 
-import { DocumentType } from "../constants/document-types.js";
+import { CUFE_DOCUMENTS, DocumentType } from "../constants/document-types.js";
+import { DianEndpoint } from "../constants/dian-endpoints.js";
 import { TaxCode, TaxCodeName } from "../constants/tax-codes.js";
 import type {
   AllowanceCharge,
@@ -530,6 +531,15 @@ function addDianExtensions(
  * @returns Multi-line string formatted for QR code generation
  */
 function buildQRCode(doc: DianDocument, uuid: string): string {
+  // The verification URL must point at DIAN's habilitación catalog while
+  // `doc.environment === "2"` (sandbox) - pointing a test document at the
+  // production catalog (as this always did before) means the QR simply
+  // can't be verified, since DIAN never received the document there.
+  const catalogBase = doc.environment === "1" ? DianEndpoint.PRODUCTION.CATALOG : DianEndpoint.SANDBOX.CATALOG;
+  // CUFE_DOCUMENTS (facturas) label their hash "CUFE"; every other document
+  // type (notas credito/debito, documento soporte, ...) uses "CUDE" - this
+  // used to hardcode "CUFE" even when `uuid` was actually a CUDE.
+  const hashLabel = CUFE_DOCUMENTS.has(doc.documentType) ? "CUFE" : "CUDE";
   const lines = [
     `NumFac: ${doc.id}`,
     `FecFac: ${formatDate(doc.issueDate)}`,
@@ -540,29 +550,35 @@ function buildQRCode(doc: DianDocument, uuid: string): string {
     `ValIva: ${formatAmount(getTaxAmount(doc, TaxCode.IVA))}`,
     `ValOtroIm: ${formatAmount(getTaxAmount(doc, TaxCode.INC) + getTaxAmount(doc, TaxCode.ICA))}`,
     `ValTotFac: ${formatAmount(doc.legalMonetaryTotal.payableAmount)}`,
-    `CUFE: ${uuid}`,
-    `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=${uuid}`,
+    `${hashLabel}: ${uuid}`,
+    `${catalogBase}document/searchqr?documentkey=${uuid}`,
   ];
   return lines.join("\n");
 }
 
 /**
- * Extracts the tax amount for a specific tax code from the document's tax totals.
- * Searches through all tax total subtotals and returns the first matching amount.
+ * Extracts the tax amount for a specific tax code from the document's tax
+ * totals, summing every matching subtotal - same reasoning as
+ * security/cufe.ts's extractTaxAmount (kept as a separate copy here rather
+ * than a shared import since this module builds display/QR text, not the
+ * hash input, but the bug was identical: returning only the first match
+ * silently dropped every other rate of the same tax type from ValIva when an
+ * invoice mixed rates, e.g. 19% and 5% IVA lines).
  *
  * @param doc - Complete DIAN document data
  * @param taxCode - DIAN tax code to search for (e.g., "01" for IVA)
- * @returns Tax amount for the specified code, or 0 if not found
+ * @returns Summed tax amount for the specified code, or 0 if not found
  */
 function getTaxAmount(doc: DianDocument, taxCode: string): number {
+  let total = 0;
   for (const tt of doc.taxTotals) {
     for (const sub of tt.subtotals) {
       if (sub.taxScheme.code === taxCode) {
-        return sub.taxAmount;
+        total += sub.taxAmount;
       }
     }
   }
-  return 0;
+  return total;
 }
 
 /**
