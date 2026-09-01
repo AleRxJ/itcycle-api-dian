@@ -1,4 +1,5 @@
 import type {
+  AllowanceCharge,
   BillingReference,
   CertificateData,
   DianSoapMethodValue,
@@ -230,6 +231,26 @@ export interface InvoiceInput {
    * These values must be consistent with the per-line tax totals.
    */
   taxTotals: TaxTotal[];
+
+  /**
+   * Document-level allowances (discounts) or charges (surcharges).
+   *
+   * Applies to the whole document rather than any single line - distinct
+   * from each `InvoiceLine`'s own `allowanceCharges`. Optional; omit when
+   * there is no document-level discount/surcharge.
+   */
+  allowanceCharges?: AllowanceCharge[];
+
+  /**
+   * Retenciones (withholding taxes: ReteFuente, ReteICA, ReteIVA - TaxCode
+   * 05/06/07) withheld by the buyer.
+   *
+   * @remarks Informational on the document itself - does NOT reduce
+   * `legalMonetaryTotal.payableAmount`. The buyer's actual disbursement net
+   * of what they withhold is a downstream accounting event between buyer and
+   * seller, not part of the invoice's own legal total.
+   */
+  withholdingTaxTotals?: TaxTotal[];
 
   /**
    * Legal monetary total summarizing all amounts in the document.

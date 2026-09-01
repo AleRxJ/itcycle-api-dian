@@ -273,6 +273,17 @@ export const DianDocumentSchema = z.object({
   customer: PartySchema,
   lines: z.array(InvoiceLineSchema).min(1),
   taxTotals: z.array(TaxTotalSchema),
+  // Document-level allowances (descuentos) - a discount applying to the
+  // whole document rather than any single line. Reuses the same shape as
+  // InvoiceLine.allowanceCharges (UBL treats both the same way structurally).
+  allowanceCharges: z.array(AllowanceChargeSchema).optional(),
+  // Retenciones (ReteFuente/ReteICA/ReteIVA, TaxCode 05/06/07) - informational
+  // on the document itself (does not reduce legalMonetaryTotal.payableAmount,
+  // same as a real DIAN invoice: the buyer's own withholding/payment to the
+  // seller is a downstream accounting event, not something this total
+  // subtracts). Same shape as taxTotals - UBL's WithholdingTaxTotal element
+  // mirrors TaxTotal's internal structure.
+  withholdingTaxTotals: z.array(TaxTotalSchema).optional(),
   legalMonetaryTotal: LegalMonetaryTotalSchema,
   paymentMeans: PaymentMeansSchema,
   period: InvoicePeriodSchema.optional(),

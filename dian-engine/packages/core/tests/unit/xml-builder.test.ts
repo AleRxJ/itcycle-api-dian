@@ -289,6 +289,52 @@ describe("buildInvoiceXml — Factura Electrónica de Venta", () => {
   });
 });
 
+describe("buildInvoiceXml — retenciones and document-level discount", () => {
+  const doc = createTestDocument(DocumentType.FACTURA_VENTA);
+  doc.id = "SETP990000002";
+  // Document-level 10% discount on the 105000 line total.
+  doc.allowanceCharges = [
+    { chargeIndicator: false, reason: "Descuento por pronto pago", amount: 10500, baseAmount: 105000, multiplierFactor: 10 },
+  ];
+  // ReteFuente (06) at 2.5% and ReteIVA (05) at 15% of the IVA already on the document.
+  doc.withholdingTaxTotals = [
+    { taxAmount: 2625, subtotals: [{ taxableAmount: 105000, taxAmount: 2625, percent: 2.5, taxScheme: { code: TaxCode.RETE_RENTA, name: "ReteRenta" } }] },
+    { taxAmount: 2992.5, subtotals: [{ taxableAmount: 19950, taxAmount: 2992.5, percent: 15, taxScheme: { code: TaxCode.RETE_IVA, name: "ReteIVA" } }] },
+  ];
+
+  const uuid = generateCufe(doc);
+  const ssc = generateSoftwareSecurityCode(doc.software.id, doc.software.pin, doc.id);
+  const xml = buildInvoiceXml(doc, uuid, ssc);
+
+  it("emits a document-level cac:AllowanceCharge", () => {
+    expect(xml).toContain("Descuento por pronto pago");
+    expect(xml).toContain("<cbc:ChargeIndicator>false</cbc:ChargeIndicator>");
+    expect(xml).toContain("10500.00");
+  });
+
+  it("emits cac:WithholdingTaxTotal entries distinct from cac:TaxTotal", () => {
+    expect(xml).toContain("cac:WithholdingTaxTotal");
+    expect(xml).toContain("2625.00");
+    expect(xml).toContain("2992.5");
+    expect(xml).toContain(">06<"); // ReteRenta TaxScheme ID
+    expect(xml).toContain(">05<"); // ReteIVA TaxScheme ID
+  });
+
+  it("places AllowanceCharge and WithholdingTaxTotal in UBL order relative to TaxTotal/LegalMonetaryTotal", () => {
+    const allowanceIdx = xml.indexOf("Descuento por pronto pago");
+    const taxTotalIdx = xml.indexOf("<cac:TaxTotal>");
+    const withholdingIdx = xml.indexOf("<cac:WithholdingTaxTotal>");
+    const monetaryTotalIdx = xml.indexOf("<cac:LegalMonetaryTotal>");
+    expect(allowanceIdx).toBeLessThan(taxTotalIdx);
+    expect(taxTotalIdx).toBeLessThan(withholdingIdx);
+    expect(withholdingIdx).toBeLessThan(monetaryTotalIdx);
+  });
+
+  it("does not reduce PayableAmount for withholding (informational only)", () => {
+    expect(xml).toContain("124950.00"); // unchanged from the no-withholding case above
+  });
+});
+
 describe("buildCreditNoteXml — Nota Crédito (type 91)", () => {
   const baseDoc = createTestDocument(DocumentType.NOTA_CREDITO);
   const doc: DianDocument = {

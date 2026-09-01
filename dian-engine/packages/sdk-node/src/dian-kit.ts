@@ -634,6 +634,8 @@ export class DianKit {
       customer: input.customer,
       lines: input.lines,
       taxTotals: input.taxTotals,
+      allowanceCharges: input.allowanceCharges,
+      withholdingTaxTotals: input.withholdingTaxTotals,
       legalMonetaryTotal: input.legalMonetaryTotal,
       paymentMeans: input.paymentMeans,
       period: input.period,

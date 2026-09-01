@@ -279,15 +279,19 @@ function addAddressFields(
 }
 
 /**
- * Adds a CAC:TaxTotal element with its TaxSubtotal children to the XML document.
- * Each subtotal includes taxable amount, tax amount, percent, and tax scheme.
+ * Adds a CAC:TaxTotal (or, with `elementName`, a CAC:WithholdingTaxTotal -
+ * UBL gives retenciones their own element name but the exact same internal
+ * TaxAmount/TaxSubtotal shape) with its TaxSubtotal children to the XML
+ * document. Each subtotal includes taxable amount, tax amount, percent, and
+ * tax scheme.
  *
- * @param parent - Parent XML builder node to append the TaxTotal element to
+ * @param parent - Parent XML builder node to append the element to
  * @param taxTotal - Tax total data with aggregated amount and subtotals
  * @param currency - ISO 4217 currency code for amount attributes (e.g., "COP")
+ * @param elementName - "TaxTotal" (default) or "WithholdingTaxTotal"
  */
-function addTaxTotalNode(parent: XMLBuilder, taxTotal: TaxTotal, currency: string): void {
-  const node = parent.ele(NS.CAC, "TaxTotal");
+function addTaxTotalNode(parent: XMLBuilder, taxTotal: TaxTotal, currency: string, elementName: "TaxTotal" | "WithholdingTaxTotal" = "TaxTotal"): void {
+  const node = parent.ele(NS.CAC, elementName);
   node.ele(NS.CBC, "TaxAmount").att("currencyID", currency).txt(formatAmount(taxTotal.taxAmount));
 
   for (const subtotal of taxTotal.subtotals) {
@@ -715,12 +719,23 @@ function buildDocumentXml(doc: DianDocument, uuid: string, softwareSecurityCode:
   // 19. PaymentMeans
   addPaymentMeansNode(root, doc.paymentMeans);
 
-  // 20. AllowanceCharge (document level)
-  // (handled in lines for now)
+  // 20. AllowanceCharge (document level) - a discount/surcharge applying to
+  // the whole document, distinct from each line's own allowanceCharges.
+  for (const ac of doc.allowanceCharges ?? []) {
+    addAllowanceChargeNode(root, ac, doc.currency);
+  }
 
   // 21. TaxTotal
   for (const taxTotal of doc.taxTotals) {
     addTaxTotalNode(root, taxTotal, doc.currency);
+  }
+
+  // 21b. WithholdingTaxTotal (retenciones: ReteFuente/ReteICA/ReteIVA) - UBL
+  // sibling of TaxTotal, same shape, own element name. Informational only:
+  // doesn't feed into legalMonetaryTotal.payableAmount (see DianDocument's
+  // withholdingTaxTotals doc comment).
+  for (const withholdingTotal of doc.withholdingTaxTotals ?? []) {
+    addTaxTotalNode(root, withholdingTotal, doc.currency, "WithholdingTaxTotal");
   }
 
   // 22. LegalMonetaryTotal

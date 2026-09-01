@@ -341,6 +341,10 @@ export interface DianDocument {
   lines: InvoiceLine[];
   /** Document-level tax totals */
   taxTotals: TaxTotal[];
+  /** Document-level allowances (discounts) - applies to the whole document, distinct from InvoiceLine.allowanceCharges */
+  allowanceCharges?: AllowanceCharge[];
+  /** Retenciones (ReteFuente/ReteICA/ReteIVA) - informational, does not reduce legalMonetaryTotal.payableAmount */
+  withholdingTaxTotals?: TaxTotal[];
   /** Summary of all monetary amounts in the document */
   legalMonetaryTotal: LegalMonetaryTotal;
   /** Payment form and method information */
