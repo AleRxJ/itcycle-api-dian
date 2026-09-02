@@ -121,7 +121,9 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
           status: "CONTINGENCY",
           simulated,
           issuedAt: new Date(),
-          errorMessage: outcome.error.message,
+          errorMessage: outcome.error.rawResponse
+            ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+            : outcome.error.message,
         },
       });
     }
@@ -184,7 +186,14 @@ export async function retryCreditNoteSend(
   const outcome = await sendWithContingencyHandling(provider, document, send);
 
   if (outcome.kind === "contingency") {
-    return await prisma.creditNote.update({ where: { id: creditNote.id }, data: { errorMessage: outcome.error.message } });
+    return await prisma.creditNote.update({
+      where: { id: creditNote.id },
+      data: {
+        errorMessage: outcome.error.rawResponse
+          ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+          : outcome.error.message,
+      },
+    });
   }
 
   const { response } = outcome;

@@ -112,7 +112,9 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
           status: "CONTINGENCY",
           simulated,
           issuedAt: new Date(),
-          errorMessage: outcome.error.message,
+          errorMessage: outcome.error.rawResponse
+            ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+            : outcome.error.message,
         },
       });
     }
@@ -184,7 +186,11 @@ export async function retrySupportDocumentSend(
   if (outcome.kind === "contingency") {
     return await prisma.supportDocument.update({
       where: { id: supportDocument.id },
-      data: { errorMessage: outcome.error.message },
+      data: {
+        errorMessage: outcome.error.rawResponse
+          ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+          : outcome.error.message,
+      },
     });
   }
 

@@ -19,6 +19,7 @@ import {
   getFirmaPassStatus,
   listTestSubmissions,
   setDianConfiguration,
+  updateNumberingResolution,
   uploadCertificate,
 } from "./admin.service.js";
 
@@ -92,6 +93,51 @@ describe("admin provisioning", () => {
     });
 
     expect(numbering.currentNumber).toBe(500);
+  });
+
+  it("updateNumberingResolution corrects an unused resolution's fields", async () => {
+    const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    const numbering = await createNumberingResolution({
+      companyId: company.id,
+      documentType: "91",
+      prefix: "WRONG",
+      resolutionNumber: "0",
+      startNumber: 1,
+      endNumber: 100,
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
+    });
+
+    const updated = await updateNumberingResolution({
+      companyId: company.id,
+      resolutionId: numbering.id,
+      prefix: "NC",
+      startNumber: 1,
+      endNumber: 999999,
+    });
+
+    expect(updated.prefix).toBe("NC");
+    expect(updated.endNumber).toBe(999999);
+    expect(updated.documentType).toBe("91"); // never changes
+  });
+
+  it("updateNumberingResolution rejects a resolution that already has documents issued against it", async () => {
+    const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    const numbering = await createNumberingResolution({
+      companyId: company.id,
+      documentType: "92",
+      prefix: "USED",
+      resolutionNumber: "0",
+      startNumber: 1,
+      endNumber: 100,
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
+    });
+    await prisma.numberingResolution.update({ where: { id: numbering.id }, data: { currentNumber: 2 } });
+
+    await expect(
+      updateNumberingResolution({ companyId: company.id, resolutionId: numbering.id, prefix: "NEW" }),
+    ).rejects.toThrow(/already has documents issued/);
   });
 
   it("uploadCertificate stores the secret through the certificate store and never returns it", async () => {

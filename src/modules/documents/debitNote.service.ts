@@ -117,7 +117,9 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
           status: "CONTINGENCY",
           simulated,
           issuedAt: new Date(),
-          errorMessage: outcome.error.message,
+          errorMessage: outcome.error.rawResponse
+            ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+            : outcome.error.message,
         },
       });
     }
@@ -180,7 +182,14 @@ export async function retryDebitNoteSend(
   const outcome = await sendWithContingencyHandling(provider, document, send);
 
   if (outcome.kind === "contingency") {
-    return await prisma.debitNote.update({ where: { id: debitNote.id }, data: { errorMessage: outcome.error.message } });
+    return await prisma.debitNote.update({
+      where: { id: debitNote.id },
+      data: {
+        errorMessage: outcome.error.rawResponse
+          ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+          : outcome.error.message,
+      },
+    });
   }
 
   const { response } = outcome;

@@ -68,6 +68,51 @@ export async function createNumberingResolution(params: CreateNumberingResolutio
   });
 }
 
+export interface UpdateNumberingResolutionParams {
+  companyId: string;
+  resolutionId: string;
+  prefix?: string;
+  resolutionNumber?: string;
+  startNumber?: number;
+  endNumber?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+/**
+ * Corrects a resolution's own fields (prefix/resolutionNumber/range/dates) -
+ * never documentType, which is the row's identity. Only allowed while
+ * currentNumber still equals startNumber: the moment any document has
+ * claimed a number from this resolution, its range/prefix become part of
+ * that document's permanent record, and editing them out from under it
+ * would desync what was actually issued from what the resolution now says.
+ * A resolution already in use needs a NEW one (superseding it), not an
+ * edit of this one.
+ */
+export async function updateNumberingResolution(params: UpdateNumberingResolutionParams) {
+  const existing = await prisma.numberingResolution.findUnique({ where: { id: params.resolutionId } });
+  if (!existing || existing.companyId !== params.companyId) {
+    throw new Error(`Numbering resolution ${params.resolutionId} not found for company ${params.companyId}`);
+  }
+  if (existing.currentNumber !== existing.startNumber) {
+    throw new Error(
+      `Numbering resolution ${params.resolutionId} already has documents issued against it (currentNumber ${existing.currentNumber} != startNumber ${existing.startNumber}) - it can no longer be edited, only superseded by a new one.`,
+    );
+  }
+
+  return prisma.numberingResolution.update({
+    where: { id: params.resolutionId },
+    data: {
+      ...(params.prefix !== undefined ? { prefix: params.prefix } : {}),
+      ...(params.resolutionNumber !== undefined ? { resolutionNumber: params.resolutionNumber } : {}),
+      ...(params.startNumber !== undefined ? { startNumber: params.startNumber, currentNumber: params.startNumber } : {}),
+      ...(params.endNumber !== undefined ? { endNumber: params.endNumber } : {}),
+      ...(params.startDate !== undefined ? { startDate: new Date(params.startDate) } : {}),
+      ...(params.endDate !== undefined ? { endDate: new Date(params.endDate) } : {}),
+    },
+  });
+}
+
 export interface UploadCertificateParams {
   companyId: string;
   provider: string;
@@ -121,6 +166,10 @@ export interface FirmaPassStatus {
 export interface DianReadiness {
   canIssueInvoices: boolean;
   environment: "SANDBOX" | "PRODUCTION" | null;
+  // Not a secret (unlike softwarePin/technicalKey, which never leave this
+  // service) - Ohnix's settings UI shows it back to the company so they can
+  // see what got registered under their own DIAN habilitación.
+  softwareId: string | null;
   configurationReady: boolean;
   invoiceResolutionReady: boolean;
   certificateReady: boolean;
@@ -131,6 +180,12 @@ export interface DianReadiness {
     documentType: string;
     prefix: string;
     resolutionNumber: string;
+    // Not secret, and needed for Ohnix's self-service edit form (91/92 only
+    // - see updateNumberingResolution) to pre-fill the current range instead
+    // of asking the owner to re-type numbers they can't otherwise see here.
+    startNumber: number;
+    endNumber: number;
+    currentNumber: number;
     startDate: Date;
     endDate: Date;
     status: string;
@@ -179,6 +234,7 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
   return {
     canIssueInvoices: missing.length === 0,
     environment: company.dianConfiguration?.environment ?? null,
+    softwareId: company.dianConfiguration?.softwareId ?? null,
     configurationReady,
     invoiceResolutionReady: Boolean(activeInvoiceResolution),
     certificateReady: activeCertificates.length > 0,
@@ -189,6 +245,9 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
       documentType: resolution.documentType,
       prefix: resolution.prefix,
       resolutionNumber: resolution.resolutionNumber,
+      startNumber: resolution.startNumber,
+      endNumber: resolution.endNumber,
+      currentNumber: resolution.currentNumber,
       startDate: resolution.startDate,
       endDate: resolution.endDate,
       status: resolution.status,

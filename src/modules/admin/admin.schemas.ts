@@ -28,6 +28,20 @@ export const CreateNumberingResolutionBodySchema = z.object({
   endDate: z.string(),
 });
 
+// documentType is intentionally absent - it's the identity of the row, not
+// a correctable field. updateNumberingResolution (admin.service.ts) also
+// rejects the whole request once currentNumber has moved past startNumber
+// (any document has actually claimed a number), so this is only ever a
+// pre-use correction, never a way to redefine a resolution mid-flight.
+export const UpdateNumberingResolutionBodySchema = z.object({
+  prefix: z.string().optional(),
+  resolutionNumber: z.string().optional(),
+  startNumber: z.number().int().optional(),
+  endNumber: z.number().int().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
 export const UploadCertificateBodySchema = z.object({
   provider: z.string(),
   certificateIdentifier: z.string(),

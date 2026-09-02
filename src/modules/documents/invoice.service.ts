@@ -107,7 +107,14 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
           status: "CONTINGENCY",
           simulated,
           issuedAt: new Date(),
-          errorMessage: outcome.error.message,
+          // rawResponse (DIAN's actual SOAP fault body, already truncated by
+          // DianTransportError itself) used to be dropped here - only the
+          // generic "servidor DIAN retornó HTTP 500" wrapper text ever
+          // reached the caller, with no way to tell a credentials/testSetId
+          // problem apart from a genuine DIAN outage.
+          errorMessage: outcome.error.rawResponse
+            ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+            : outcome.error.message,
         },
       });
     }
@@ -180,7 +187,11 @@ export async function retryInvoiceSend(
   if (outcome.kind === "contingency") {
     return await prisma.invoice.update({
       where: { id: invoice.id },
-      data: { errorMessage: outcome.error.message },
+      data: {
+        errorMessage: outcome.error.rawResponse
+          ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+          : outcome.error.message,
+      },
     });
   }
 

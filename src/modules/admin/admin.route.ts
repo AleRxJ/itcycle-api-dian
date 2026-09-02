@@ -7,6 +7,7 @@ import {
   FirmaPassUploadArchivoBodySchema,
   FirmaPassUploadRutBodySchema,
   SetDianConfigurationBodySchema,
+  UpdateNumberingResolutionBodySchema,
   UploadCertificateBodySchema,
 } from "./admin.schemas.js";
 import {
@@ -18,6 +19,7 @@ import {
   listTestSubmissions,
   refreshDocumentStatus,
   setDianConfiguration,
+  updateNumberingResolution,
   uploadCertificate,
   type RefreshableDocumentType,
 } from "./admin.service.js";
@@ -54,6 +56,21 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       const body = CreateNumberingResolutionBodySchema.parse(request.body);
       const numbering = await createNumberingResolution({ companyId: request.params.id, ...body });
       return reply.code(201).send(numbering);
+    },
+  );
+
+  // Correction-only - see updateNumberingResolution's own comment for why
+  // this rejects a resolution that already has documents issued against it.
+  app.patch<{ Params: { id: string; resolutionId: string } }>(
+    "/api/v1/admin/companies/:id/numbering-resolutions/:resolutionId",
+    async (request, reply) => {
+      const body = UpdateNumberingResolutionBodySchema.parse(request.body);
+      const numbering = await updateNumberingResolution({
+        companyId: request.params.id,
+        resolutionId: request.params.resolutionId,
+        ...body,
+      });
+      return reply.send(numbering);
     },
   );
 
