@@ -50,6 +50,15 @@ model Company {
   /// One active login key per company, mirroring FirmaPass's own one-key-per-account
   /// model. Never returned by any API response.
   firmaPassLoginKeyCiphertext String?
+  /// Explicit choice of which certificate provider signs this company's real
+  /// documents, when it has an ACTIVE certificate from more than one
+  /// provider at once (e.g. mid-migration, or a manual contingency
+  /// fallback). Null (the default for every existing company) preserves the
+  /// original behavior exactly: loadDianConfig picks whichever ACTIVE,
+  /// non-expired certificate was created most recently, regardless of
+  /// provider. Only meaningful when set to a provider the company actually
+  /// has an active certificate for - see dianConfig.service.ts.
+  certificateProviderOverride String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

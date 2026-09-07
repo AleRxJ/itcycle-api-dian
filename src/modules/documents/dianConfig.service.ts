@@ -77,9 +77,21 @@ export async function loadDianConfig(
     where: { companyId: params.companyId, status: "ACTIVE" },
     orderBy: { createdAt: "desc" },
   });
-  const certificate = candidateCertificates.find((c) => !c.expiresAt || c.expiresAt >= now);
+  // certificateProviderOverride is null for every company by default -
+  // preserves the original "most recently created ACTIVE cert, regardless
+  // of provider" behavior exactly. Only companies that explicitly chose a
+  // provider (because they have more than one ACTIVE at once - mid-migration
+  // or a manual contingency fallback) get filtered to just that provider.
+  const eligibleCertificates = company.certificateProviderOverride
+    ? candidateCertificates.filter((c) => c.provider === company.certificateProviderOverride)
+    : candidateCertificates;
+  const certificate = eligibleCertificates.find((c) => !c.expiresAt || c.expiresAt >= now);
   if (!certificate) {
-    throw new Error(`Company ${params.companyId} has no ACTIVE, non-expired Certificate.`);
+    throw new Error(
+      company.certificateProviderOverride
+        ? `Company ${params.companyId} has no ACTIVE, non-expired Certificate from provider "${company.certificateProviderOverride}" (its chosen certificateProviderOverride).`
+        : `Company ${params.companyId} has no ACTIVE, non-expired Certificate.`,
+    );
   }
 
   const secret = await secretStore.get(certificate.secretReference);

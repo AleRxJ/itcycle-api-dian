@@ -100,11 +100,21 @@ export const CreateViafirmaRequestBodySchema = z.object({
   identity: z.string(),
   emailCertificate: z.string(),
   organizationType: z.enum(["RM", "PROP", "RUNEOL", "RNT", "ESAL", "ESOL", "JUEGOS", "EXTRANJERAS"]).optional(),
+  // CEA-3.0-07 art. 10.11.1.e - must be true, enforced again in
+  // createViafirmaRequest itself so this can't be bypassed by calling the
+  // API directly instead of going through the form's own checkbox.
+  termsAccepted: z.literal(true),
 });
 
 export const ViafirmaUploadDocumentBodySchema = z.object({
   name: z.string(),
   base64: z.string(),
+});
+
+// null clears the override, returning to "most recently created ACTIVE
+// certificate, any provider" - see Company.certificateProviderOverride.
+export const SetCertificateProviderOverrideBodySchema = z.object({
+  provider: z.string().nullable(),
 });
 
 export const ViafirmaRevokeBodySchema = z.object({

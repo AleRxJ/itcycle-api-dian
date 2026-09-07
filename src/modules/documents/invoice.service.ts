@@ -75,6 +75,10 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
       status: "PROCESSING",
       testSetId: params.send?.testSetId ?? null,
     },
+    // So every response (this create, and the two findFirst reads below)
+    // tells the caller which provider actually signed the document - useful
+    // now that a company can have certificates from more than one at once.
+    include: { certificate: true },
   });
 
   try {
@@ -116,6 +120,7 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
             ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
             : outcome.error.message,
         },
+        include: { certificate: true },
       });
     }
 
@@ -132,6 +137,7 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
         sentAt: new Date(),
         ...computeSentStatusFields(response),
       },
+      include: { certificate: true },
     });
   } catch (error) {
     await prisma.invoice.update({
@@ -192,6 +198,7 @@ export async function retryInvoiceSend(
           ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
           : outcome.error.message,
       },
+      include: { certificate: true },
     });
   }
 
@@ -203,11 +210,12 @@ export async function retryInvoiceSend(
       sentAt: new Date(),
       ...computeSentStatusFields(response),
     },
+    include: { certificate: true },
   });
 }
 
 export async function getInvoice(companyId: string, id: string) {
-  return prisma.invoice.findFirst({ where: { id, companyId } });
+  return prisma.invoice.findFirst({ where: { id, companyId }, include: { certificate: true } });
 }
 
 /**

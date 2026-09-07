@@ -98,6 +98,7 @@ describe("createViafirmaRequest", () => {
       countryCode: "CO",
       identity: "123",
       emailCertificate: "info@mail.com",
+      termsAccepted: true,
     });
 
     expect(result.codRequest).toBe("REQ123");
@@ -138,9 +139,32 @@ describe("createViafirmaRequest", () => {
         countryCode: "CO",
         identity: "123",
         emailCertificate: "info@mail.com",
+        termsAccepted: true,
       }),
     ).rejects.toThrow("Viafirma is down");
 
+    const certificates = await prisma.certificate.findMany({ where: { companyId: company.id } });
+    expect(certificates).toHaveLength(0);
+  });
+
+  it("rejects the request before touching Viafirma or the private key when terms were not accepted", async () => {
+    const company = await createCompany({ name: "Viafirma Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    mockGetAvailableProfiles.mockResolvedValue([FAKE_PROFILE]);
+
+    await expect(
+      createViafirmaRequest({
+        companyId: company.id,
+        profileKind: "FE-PJ",
+        subject: PJ_SUBJECT,
+        identityType: "IDC",
+        countryCode: "CO",
+        identity: "123",
+        emailCertificate: "info@mail.com",
+        termsAccepted: false,
+      }),
+    ).rejects.toThrow(/termsAccepted/);
+
+    expect(mockCreateRequestFromCsr).not.toHaveBeenCalled();
     const certificates = await prisma.certificate.findMany({ where: { companyId: company.id } });
     expect(certificates).toHaveLength(0);
   });
@@ -158,6 +182,7 @@ describe("createViafirmaRequest", () => {
         countryCode: "CO",
         identity: "123",
         emailCertificate: "info@mail.com",
+        termsAccepted: true,
       }),
     ).rejects.toThrow(/No Viafirma profile/);
   });
@@ -177,6 +202,7 @@ describe("getViafirmaCertificateStatus", () => {
       countryCode: "CO",
       identity: "123",
       emailCertificate: "info@mail.com",
+      termsAccepted: true,
     });
 
     mockGetStatus.mockResolvedValue({

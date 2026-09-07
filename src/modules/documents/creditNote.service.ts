@@ -82,6 +82,9 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
       status: "PROCESSING",
       testSetId: params.send?.testSetId ?? null,
     },
+    // So every response tells the caller which provider actually signed
+    // this document - a company can have certificates from more than one at once.
+    include: { certificate: true },
   });
 
   try {
@@ -125,6 +128,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
             ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
             : outcome.error.message,
         },
+        include: { certificate: true },
       });
     }
 
@@ -141,6 +145,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
         sentAt: new Date(),
         ...computeSentStatusFields(response),
       },
+      include: { certificate: true },
     });
   } catch (error) {
     await prisma.creditNote.update({
@@ -193,6 +198,7 @@ export async function retryCreditNoteSend(
           ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
           : outcome.error.message,
       },
+      include: { certificate: true },
     });
   }
 
@@ -204,9 +210,10 @@ export async function retryCreditNoteSend(
       sentAt: new Date(),
       ...computeSentStatusFields(response),
     },
+    include: { certificate: true },
   });
 }
 
 export async function getCreditNote(companyId: string, id: string) {
-  return prisma.creditNote.findFirst({ where: { id, companyId } });
+  return prisma.creditNote.findFirst({ where: { id, companyId }, include: { certificate: true } });
 }

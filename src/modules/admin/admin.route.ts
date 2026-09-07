@@ -7,6 +7,7 @@ import {
   CreateViafirmaRequestBodySchema,
   FirmaPassUploadArchivoBodySchema,
   FirmaPassUploadRutBodySchema,
+  SetCertificateProviderOverrideBodySchema,
   SetDianConfigurationBodySchema,
   UpdateNumberingResolutionBodySchema,
   UploadCertificateBodySchema,
@@ -17,10 +18,12 @@ import {
   createApiKeyForCompany,
   createCompany,
   createNumberingResolution,
+  getCertificateProviderStatus,
   getDianReadiness,
   getFirmaPassStatus,
   listTestSubmissions,
   refreshDocumentStatus,
+  setCertificateProviderOverride,
   setDianConfiguration,
   updateNumberingResolution,
   uploadCertificate,
@@ -38,6 +41,7 @@ import {
   createViafirmaRequest,
   getViafirmaCertificateStatus,
   getViafirmaKycLink,
+  getViafirmaProfileTerms,
   listViafirmaCertificates,
   listViafirmaDocuments,
   revokeViafirmaCertificate,
@@ -180,6 +184,18 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   // Unlike FirmaPass, this starts from nothing (no pre-existing validation
   // to discover) — the CSR/keypair are generated server-side by
   // createViafirmaRequest itself.
+
+  // Not actually company-specific (terms are RA-wide, per profile kind) -
+  // scoped under :id anyway to match every other Viafirma route here, since
+  // the caller (Ohnix) always has a companyId on hand at this point.
+  app.get<{ Params: { id: string }; Querystring: { profileKind: "FE-PJ" | "FE-PN" } }>(
+    "/api/v1/admin/companies/:id/viafirma/terms",
+    async (request, reply) => {
+      const result = await getViafirmaProfileTerms(request.query.profileKind);
+      return reply.send(result);
+    },
+  );
+
   app.post<{ Params: { id: string } }>("/api/v1/admin/companies/:id/viafirma/requests", async (request, reply) => {
     const body = CreateViafirmaRequestBodySchema.parse(request.body);
     const result = await createViafirmaRequest({ companyId: request.params.id, ...body });
@@ -250,6 +266,20 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/dian-readiness", async (request, reply) => {
     const readiness = await getDianReadiness(request.params.id);
     return reply.code(200).send(readiness);
+  });
+
+  // Which certificate provider signs this company's real documents - a
+  // selector only makes sense in Ohnix's UI when the GET below reports more
+  // than one entry in activeProviders (see admin.service.ts).
+  app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/certificate-provider", async (request, reply) => {
+    const status = await getCertificateProviderStatus(request.params.id);
+    return reply.code(200).send(status);
+  });
+
+  app.put<{ Params: { id: string } }>("/api/v1/admin/companies/:id/certificate-provider", async (request, reply) => {
+    const body = SetCertificateProviderOverrideBodySchema.parse(request.body);
+    const status = await setCertificateProviderOverride(request.params.id, body.provider);
+    return reply.code(200).send(status);
   });
 
   // Resolves the real DIAN verdict for a document an async send (SendBillAsync/

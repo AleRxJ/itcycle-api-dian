@@ -117,6 +117,14 @@ export interface CreateViafirmaRequestParams {
   emailCertificate: string;
   /** Required for FE-PJ (§2.3.2.3); ignored for FE-PN. "RM" is the doc's own recommended default. */
   organizationType?: "RM" | "PROP" | "RUNEOL" | "RNT" | "ESAL" | "ESOL" | "JUEGOS" | "EXTRANJERAS";
+  /**
+   * Must be `true` - CEA-3.0-07 art. 10.11.1.e (ONAC digital-certification
+   * regulation) requires demonstrable acceptance of the profile's terms and
+   * conditions before a request can be submitted. The caller's own form is
+   * expected to block submission on this already; this is the
+   * can't-be-bypassed enforcement of that same rule.
+   */
+  termsAccepted: boolean;
 }
 
 export interface CreateViafirmaRequestResult {
@@ -138,6 +146,10 @@ export interface CreateViafirmaRequestResult {
  * re-fetched, and this runs once per certificate issuance (not a hot path).
  */
 export async function createViafirmaRequest(params: CreateViafirmaRequestParams): Promise<CreateViafirmaRequestResult> {
+  if (!params.termsAccepted) {
+    throw new Error("termsAccepted must be true - CEA-3.0-07 art. 10.11.1.e requires accepting the profile's terms before requesting a certificate");
+  }
+
   const provider = getProvider();
 
   const profiles = await provider.getAvailableProfiles();
@@ -213,6 +225,24 @@ export async function createViafirmaRequest(params: CreateViafirmaRequestParams)
   });
 
   return { certificateId: certificate.id, codRequest: created.codRequest };
+}
+
+/**
+ * Terms-and-conditions URL for a profile kind, straight from Viafirma's own
+ * `getAvailableProfiles()` (§2.3.1) - never cached beyond the request, per
+ * the doc's own warning to re-check this periodically rather than treat it
+ * as a fixed value. Used to render the mandatory acceptance checkbox
+ * (§3.4 / CEA-3.0-07 art. 10.11.1.e) before a request can be submitted.
+ */
+export async function getViafirmaProfileTerms(profileKind: ViafirmaProfileKind): Promise<{ terms: string }> {
+  const provider = getProvider();
+  const profiles = await provider.getAvailableProfiles();
+  const wantedType = profileKind === "FE-PJ" ? "CORPORATIVO" : "INDIVIDUAL";
+  const profile = profiles.find((p) => p.type === wantedType);
+  if (!profile) {
+    throw new Error(`No Viafirma profile of type ${wantedType} is available for RA "${env.viafirmaRa}" in this environment`);
+  }
+  return { terms: profile.terms };
 }
 
 export interface ViafirmaCertificateStatusResult extends CertificateProviderStatusResult {

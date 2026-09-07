@@ -156,6 +156,8 @@ export interface FirmaPassStatusCertificate {
   status: string;
   expiresAt: Date | null;
   createdAt: Date;
+  /** Only populated by getDianReadiness (every provider); getFirmaPassStatus's own list is already firmapass-only, so it's redundant there. */
+  provider?: string;
 }
 
 export interface FirmaPassStatus {
@@ -223,8 +225,14 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
       && resolution.endDate >= now
       && resolution.currentNumber <= resolution.endNumber,
   );
+  // Mirrors dianConfig.service.ts's loadDianConfig exactly (including the
+  // certificateProviderOverride filter) - otherwise this could report
+  // "ready" off some other provider's active certificate while the real
+  // signing call throws because the company's chosen override doesn't match it.
   const activeCertificates = company.certificates.filter((certificate) =>
-    certificate.status === "ACTIVE" && (!certificate.expiresAt || certificate.expiresAt >= now),
+    certificate.status === "ACTIVE"
+      && (!certificate.expiresAt || certificate.expiresAt >= now)
+      && (!company.certificateProviderOverride || certificate.provider === company.certificateProviderOverride),
   );
   const missing: string[] = [];
   if (!configurationReady) missing.push("dian_configuration");
@@ -256,11 +264,58 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
     certificates: company.certificates.map((certificate) => ({
       id: certificate.id,
       certificateIdentifier: certificate.certificateIdentifier,
+      provider: certificate.provider,
       status: certificate.status,
       expiresAt: certificate.expiresAt,
       createdAt: certificate.createdAt,
     })),
   };
+}
+
+export interface CertificateProviderStatus {
+  /** Providers this company currently has an ACTIVE, non-expired Certificate for - the set a UI could actually choose between. */
+  activeProviders: string[];
+  /** Null for every company by default - see Company.certificateProviderOverride and loadDianConfig. */
+  override: string | null;
+}
+
+/**
+ * Read-only projection for the "which provider signs my documents" UI - a
+ * selector only makes sense to show when `activeProviders.length > 1`
+ * (more than one provider has a currently-usable certificate at once).
+ */
+export async function getCertificateProviderStatus(companyId: string): Promise<CertificateProviderStatus> {
+  const now = new Date();
+  const company = await prisma.company.findUniqueOrThrow({
+    where: { id: companyId },
+    include: { certificates: true },
+  });
+  const activeProviders = [
+    ...new Set(
+      company.certificates
+        .filter((c) => c.status === "ACTIVE" && (!c.expiresAt || c.expiresAt >= now))
+        .map((c) => c.provider),
+    ),
+  ];
+  return { activeProviders, override: company.certificateProviderOverride };
+}
+
+/**
+ * Sets (or clears, with `provider: null`) which certificate provider signs
+ * this company's real documents - see Company.certificateProviderOverride
+ * and loadDianConfig. Refuses a provider the company has no ACTIVE
+ * certificate for, since that would just make loadDianConfig throw on the
+ * next real document instead of failing clearly right here.
+ */
+export async function setCertificateProviderOverride(companyId: string, provider: string | null): Promise<CertificateProviderStatus> {
+  if (provider !== null) {
+    const status = await getCertificateProviderStatus(companyId);
+    if (!status.activeProviders.includes(provider)) {
+      throw new Error(`Company ${companyId} has no ACTIVE certificate from provider "${provider}" - cannot set it as the certificateProviderOverride.`);
+    }
+  }
+  await prisma.company.update({ where: { id: companyId }, data: { certificateProviderOverride: provider } });
+  return getCertificateProviderStatus(companyId);
 }
 
 /** Read-only snapshot for Ohnix's admin UI — no schema change, just a projection of existing columns. */
@@ -394,6 +449,11 @@ export interface TestSubmission {
   status: string;
   errorMessage: string | null;
   createdAt: Date;
+  /** Null only for documents created before certificateId existed on this row, if any predate this field. */
+  certificateId: string | null;
+  /** "firmapass" | "viafirma" - null only if the certificate row was later deleted (e.g. a rejected Viafirma request cleanup - see viafirmaIssuance.job.ts). */
+  certificateProvider: string | null;
+  certificateIdentifier: string | null;
 }
 
 /**
@@ -410,17 +470,17 @@ export async function listTestSubmissions(companyId: string, testSetId?: string)
   const where = testSetId ? { companyId, testSetId } : { companyId, testSetId: { not: null } };
 
   const [invoices, creditNotes, debitNotes, supportDocuments] = await Promise.all([
-    prisma.invoice.findMany({ where }),
-    prisma.creditNote.findMany({ where }),
-    prisma.debitNote.findMany({ where }),
-    prisma.supportDocument.findMany({ where }),
+    prisma.invoice.findMany({ where, include: { certificate: true } }),
+    prisma.creditNote.findMany({ where, include: { certificate: true } }),
+    prisma.debitNote.findMany({ where, include: { certificate: true } }),
+    prisma.supportDocument.findMany({ where, include: { certificate: true } }),
   ]);
 
   const submissions: TestSubmission[] = [
-    ...invoices.map((r) => ({ documentType: "01" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.invoiceNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
-    ...creditNotes.map((r) => ({ documentType: "91" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.noteNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
-    ...debitNotes.map((r) => ({ documentType: "92" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.noteNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
-    ...supportDocuments.map((r) => ({ documentType: "05" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.documentNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt })),
+    ...invoices.map((r) => ({ documentType: "01" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.invoiceNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt, certificateId: r.certificateId, certificateProvider: r.certificate?.provider ?? null, certificateIdentifier: r.certificate?.certificateIdentifier ?? null })),
+    ...creditNotes.map((r) => ({ documentType: "91" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.noteNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt, certificateId: r.certificateId, certificateProvider: r.certificate?.provider ?? null, certificateIdentifier: r.certificate?.certificateIdentifier ?? null })),
+    ...debitNotes.map((r) => ({ documentType: "92" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.noteNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt, certificateId: r.certificateId, certificateProvider: r.certificate?.provider ?? null, certificateIdentifier: r.certificate?.certificateIdentifier ?? null })),
+    ...supportDocuments.map((r) => ({ documentType: "05" as const, id: r.id, internalReference: r.internalReference, documentNumber: r.documentNumber, testSetId: r.testSetId, status: r.status, errorMessage: r.errorMessage, createdAt: r.createdAt, certificateId: r.certificateId, certificateProvider: r.certificate?.provider ?? null, certificateIdentifier: r.certificate?.certificateIdentifier ?? null })),
   ];
 
   return submissions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());

@@ -78,6 +78,9 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
       status: "PROCESSING",
       testSetId: params.send?.testSetId ?? null,
     },
+    // So every response tells the caller which provider actually signed
+    // this document - a company can have certificates from more than one at once.
+    include: { certificate: true },
   });
 
   try {
@@ -121,6 +124,7 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
             ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
             : outcome.error.message,
         },
+        include: { certificate: true },
       });
     }
 
@@ -137,6 +141,7 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
         sentAt: new Date(),
         ...computeSentStatusFields(response),
       },
+      include: { certificate: true },
     });
   } catch (error) {
     await prisma.debitNote.update({
@@ -189,6 +194,7 @@ export async function retryDebitNoteSend(
           ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
           : outcome.error.message,
       },
+      include: { certificate: true },
     });
   }
 
@@ -200,9 +206,10 @@ export async function retryDebitNoteSend(
       sentAt: new Date(),
       ...computeSentStatusFields(response),
     },
+    include: { certificate: true },
   });
 }
 
 export async function getDebitNote(companyId: string, id: string) {
-  return prisma.debitNote.findFirst({ where: { id, companyId } });
+  return prisma.debitNote.findFirst({ where: { id, companyId }, include: { certificate: true } });
 }

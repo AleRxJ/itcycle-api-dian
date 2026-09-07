@@ -81,6 +81,9 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
       status: "PROCESSING",
       testSetId: params.send?.testSetId ?? null,
     },
+    // So every response tells the caller which provider actually signed
+    // this document - a company can have certificates from more than one at once.
+    include: { certificate: true },
   });
 
   try {
@@ -116,6 +119,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
             ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
             : outcome.error.message,
         },
+        include: { certificate: true },
       });
     }
 
@@ -134,6 +138,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
         acceptedAt: response.isValid ? new Date() : null,
         errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
       },
+      include: { certificate: true },
     });
   } catch (error) {
     await prisma.supportDocument.update({
@@ -191,6 +196,7 @@ export async function retrySupportDocumentSend(
           ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
           : outcome.error.message,
       },
+      include: { certificate: true },
     });
   }
 
@@ -204,11 +210,12 @@ export async function retrySupportDocumentSend(
       acceptedAt: response.isValid ? new Date() : null,
       errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
     },
+    include: { certificate: true },
   });
 }
 
 export async function getSupportDocument(companyId: string, id: string) {
-  return prisma.supportDocument.findFirst({ where: { id, companyId } });
+  return prisma.supportDocument.findFirst({ where: { id, companyId }, include: { certificate: true } });
 }
 
 /**
