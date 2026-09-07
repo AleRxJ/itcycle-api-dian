@@ -53,6 +53,11 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
         internalReference: params.internalReference,
       },
     },
+    // So a retried request (e.g. after the caller's own timeout - the
+    // original attempt keeps running server-side even if the client gave
+    // up waiting) still tells the caller which certificate is signing this
+    // document, same as every other return path in this file.
+    include: { certificate: true },
   });
   if (existing) {
     // Idempotent replay: never re-send the same internalReference to DIAN,

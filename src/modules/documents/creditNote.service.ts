@@ -46,6 +46,10 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
         internalReference: params.internalReference,
       },
     },
+    // So a retried request (e.g. after the caller's own timeout) still
+    // tells the caller which certificate is signing this document, same as
+    // every other return path in this file.
+    include: { certificate: true },
   });
   if (existing) {
     return existing;
