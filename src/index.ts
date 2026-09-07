@@ -2,6 +2,7 @@ import Fastify from "fastify";
 
 import { startContingencyRetryScheduler } from "./jobs/contingencyRetry.job.js";
 import { startFirmaPassIssuanceScheduler } from "./jobs/firmaPassIssuance.job.js";
+import { startViafirmaIssuanceScheduler } from "./jobs/viafirmaIssuance.job.js";
 import { registerAdminRoutes } from "./modules/admin/admin.route.js";
 import { registerCreditNoteRoutes } from "./modules/documents/creditNote.route.js";
 import { registerDebitNoteRoutes } from "./modules/documents/debitNote.route.js";
@@ -47,6 +48,7 @@ await app.register(async (adminRoutes) => {
 
 startContingencyRetryScheduler(app.log);
 startFirmaPassIssuanceScheduler(app.log);
+startViafirmaIssuanceScheduler(app.log);
 
 app.listen({ port: env.port, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);

@@ -71,4 +71,48 @@ export const env = {
    * against each other). Override for local development only.
    */
   firmaPassBaseUrl: process.env.FIRMAPASS_BASE_URL || "https://identidad.firmapass.com",
+
+  // --- Viafirma Colombia (PKCS#10 RA API) -----------------------------
+  // See src/providers/certificates/ViafirmaCertificateProvider.ts and
+  // CertificateProviderRegistry.ts. Master rollout switch: false until the
+  // Sandbox integration (Fase 3) is validated end-to-end — see
+  // "Uso del API para perfiles PKCS#10 v1.7" §2.1 for the credentials this
+  // unlocks.
+  /** Master on/off switch, independent of PRIMARY_PROVIDER — lets Viafirma be configured but dark during rollout. */
+  viafirmaEnabled: process.env.VIAFIRMA_ENABLED === "true",
+  /** "viafirma" (target end state) or "firmapass" (current state, and the safe default while VIAFIRMA_ENABLED=false). */
+  certificatePrimaryProvider: (process.env.PRIMARY_PROVIDER === "viafirma" ? "viafirma" : "firmapass") as
+    | "viafirma"
+    | "firmapass",
+  /** Provider to retry a NEW-request technical failure against — see CertificateProviderRegistry.fallbackForNewRequestFailure. Empty/unset disables fallback regardless of certificateFallbackEnabled. */
+  certificateFallbackProvider: (process.env.FALLBACK_PROVIDER === "viafirma"
+    ? "viafirma"
+    : process.env.FALLBACK_PROVIDER === "firmapass"
+      ? "firmapass"
+      : null) as "viafirma" | "firmapass" | null,
+  /** Default true (matches the brief's "FALLBACK_ENABLED=true" example) — set false to force PRIMARY_PROVIDER only, e.g. while diagnosing a Viafirma-specific issue without FirmaPass silently absorbing failures. */
+  certificateFallbackEnabled: process.env.FALLBACK_ENABLED !== "false",
+  /**
+   * https://sandbox.viafirma.com/ra/api/v2 (default) or
+   * https://ecd.viafirma.com/ra/api/v2 for Production — §2.1. Never mix a
+   * Sandbox Consumer Key/Secret with the Production URL or vice versa
+   * (same non-interop warning as FirmaPass's own sandbox/production split).
+   */
+  viafirmaBaseUrl: process.env.VIAFIRMA_BASE_URL || "https://sandbox.viafirma.com/ra/api/v2",
+  /**
+   * Download host for §2.3.5 (`{{urlRADescarga}}` in the Postman
+   * collection) — REQUIERE_CONFIRMACION_VIAFIRMA: the exact Sandbox/
+   * Production value for this host is not spelled out in the PDF text
+   * itself, only implied by the Postman variable name. Confirm with
+   * Viafirma/their Postman environment file before Fase 3 goes live.
+   */
+  viafirmaDownloadBaseUrl: process.env.VIAFIRMA_DOWNLOAD_BASE_URL,
+  /** OAuth 1.0 (HMAC-SHA1) Consumer Key — §2.1. Backend-only; never expose to Frontend. */
+  viafirmaConsumerKey: process.env.VIAFIRMA_CONSUMER_KEY,
+  /** OAuth 1.0 (HMAC-SHA1) Consumer Secret — §2.1. Backend-only; never expose to Frontend, never logged. */
+  viafirmaConsumerSecret: process.env.VIAFIRMA_CONSUMER_SECRET,
+  /** RA code, e.g. "viafirmaco" — §2.3.1 `ra` query param. */
+  viafirmaRa: process.env.VIAFIRMA_RA || "viafirmaco",
+  /** Cron expression for how often pending Viafirma certificate issuances are polled — see src/jobs/viafirmaIssuance.job.ts. Default: every 10 minutes, matching FIRMAPASS_ISSUANCE_CRON. */
+  viafirmaIssuanceCron: process.env.VIAFIRMA_ISSUANCE_CRON ?? "*/10 * * * *",
 };

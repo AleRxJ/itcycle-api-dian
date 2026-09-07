@@ -4,11 +4,14 @@ import {
   CreateApiKeyBodySchema,
   CreateCompanyBodySchema,
   CreateNumberingResolutionBodySchema,
+  CreateViafirmaRequestBodySchema,
   FirmaPassUploadArchivoBodySchema,
   FirmaPassUploadRutBodySchema,
   SetDianConfigurationBodySchema,
   UpdateNumberingResolutionBodySchema,
   UploadCertificateBodySchema,
+  ViafirmaRevokeBodySchema,
+  ViafirmaUploadDocumentBodySchema,
 } from "./admin.schemas.js";
 import {
   createApiKeyForCompany,
@@ -31,6 +34,15 @@ import {
   uploadArchivo,
   uploadRut,
 } from "../firmapass/firmaPassIssuance.service.js";
+import {
+  createViafirmaRequest,
+  getViafirmaCertificateStatus,
+  getViafirmaKycLink,
+  listViafirmaCertificates,
+  listViafirmaDocuments,
+  revokeViafirmaCertificate,
+  uploadViafirmaDocument,
+} from "../viafirma/viafirmaIssuance.service.js";
 
 /**
  * Tenant provisioning for Ohnix (or any other future caller acting as
@@ -163,6 +175,77 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const status = await getFirmaPassStatus(request.params.id);
     return reply.send(status);
   });
+
+  // Viafirma digital-certificate issuance (see modules/viafirma/viafirmaIssuance.service.ts).
+  // Unlike FirmaPass, this starts from nothing (no pre-existing validation
+  // to discover) — the CSR/keypair are generated server-side by
+  // createViafirmaRequest itself.
+  app.post<{ Params: { id: string } }>("/api/v1/admin/companies/:id/viafirma/requests", async (request, reply) => {
+    const body = CreateViafirmaRequestBodySchema.parse(request.body);
+    const result = await createViafirmaRequest({ companyId: request.params.id, ...body });
+    return reply.code(201).send(result);
+  });
+
+  app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/viafirma/certificates", async (request, reply) => {
+    const result = await listViafirmaCertificates(request.params.id);
+    return reply.send(result);
+  });
+
+  app.get<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/status",
+    async (request, reply) => {
+      const status = await getViafirmaCertificateStatus({
+        companyId: request.params.id,
+        certificateId: request.params.certificateId,
+      });
+      return reply.send(status);
+    },
+  );
+
+  // Valid only while status === "accreditation" (§2.3.8) — Viafirma itself
+  // returns 400 link_not_generated otherwise; propagated as-is.
+  app.get<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/kyc-link",
+    async (request, reply) => {
+      const link = await getViafirmaKycLink({ companyId: request.params.id, certificateId: request.params.certificateId });
+      return reply.send({ link });
+    },
+  );
+
+  app.post<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/documents",
+    async (request, reply) => {
+      const body = ViafirmaUploadDocumentBodySchema.parse(request.body);
+      const result = await uploadViafirmaDocument({
+        companyId: request.params.id,
+        certificateId: request.params.certificateId,
+        name: body.name,
+        base64: body.base64,
+      });
+      return reply.code(201).send(result);
+    },
+  );
+
+  app.get<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/documents",
+    async (request, reply) => {
+      const result = await listViafirmaDocuments({ companyId: request.params.id, certificateId: request.params.certificateId });
+      return reply.send(result);
+    },
+  );
+
+  app.post<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/revoke",
+    async (request, reply) => {
+      const body = ViafirmaRevokeBodySchema.parse(request.body);
+      const result = await revokeViafirmaCertificate({
+        companyId: request.params.id,
+        certificateId: request.params.certificateId,
+        reason: body.reason,
+      });
+      return reply.send(result);
+    },
+  );
 
   app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/dian-readiness", async (request, reply) => {
     const readiness = await getDianReadiness(request.params.id);

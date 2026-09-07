@@ -63,3 +63,50 @@ export const FirmaPassUploadArchivoBodySchema = z.object({
   type: z.string(),
   fileBase64: z.string(),
 });
+
+// Viafirma (see modules/viafirma/viafirmaIssuance.service.ts) — CSR subject
+// per API doc §3.1 (FE-PJ, 10 attrs)/§3.2 (FE-PN, 8 attrs actually listed).
+const ViafirmaCsrSubjectPJSchema = z.object({
+  profileKind: z.literal("FE-PJ"),
+  country: z.string(),
+  state: z.string(),
+  locality: z.string(),
+  address: z.string(),
+  organization: z.string(),
+  organizationalUnit: z.string(),
+  nit: z.string(),
+  email: z.string(),
+  givenName: z.string(),
+  surname: z.string(),
+});
+
+const ViafirmaCsrSubjectPNSchema = z.object({
+  profileKind: z.literal("FE-PN"),
+  country: z.string(),
+  state: z.string(),
+  locality: z.string(),
+  address: z.string(),
+  identity: z.string(),
+  email: z.string(),
+  givenName: z.string(),
+  surname: z.string(),
+});
+
+export const CreateViafirmaRequestBodySchema = z.object({
+  profileKind: z.enum(["FE-PJ", "FE-PN"]),
+  subject: z.discriminatedUnion("profileKind", [ViafirmaCsrSubjectPJSchema, ViafirmaCsrSubjectPNSchema]),
+  identityType: z.enum(["IDC", "PAS"]),
+  countryCode: z.string(),
+  identity: z.string(),
+  emailCertificate: z.string(),
+  organizationType: z.enum(["RM", "PROP", "RUNEOL", "RNT", "ESAL", "ESOL", "JUEGOS", "EXTRANJERAS"]).optional(),
+});
+
+export const ViafirmaUploadDocumentBodySchema = z.object({
+  name: z.string(),
+  base64: z.string(),
+});
+
+export const ViafirmaRevokeBodySchema = z.object({
+  reason: z.string().optional(),
+});

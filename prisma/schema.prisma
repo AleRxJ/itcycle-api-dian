@@ -163,6 +163,13 @@ model Certificate {
   /// providers, and set for FirmaPass once issuance finishes.
   expiresAt              DateTime?
   status                 RecordStatus @default(ACTIVE)
+  /// Provider-specific, non-secret bits that don't fit the columns above —
+  /// e.g. Viafirma's `publicId` (needed for the P7B download step,
+  /// distinct from `certificateIdentifier`/`codRequest` used everywhere
+  /// else) and, while a request is still pending, its raw provider status
+  /// code for support/debugging. NEVER put secret material here (see
+  /// `secretReference` instead) — this column is not encrypted at rest.
+  providerMetadata       Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
