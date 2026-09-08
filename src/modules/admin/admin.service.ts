@@ -5,6 +5,7 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { generateApiKey } from "../../shared/apiKeyAuth.js";
 import { env } from "../../shared/env.js";
 import { loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
+import { isTestSetAlreadyAcceptedMessage } from "../documents/documentSend.service.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 
@@ -401,11 +402,12 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
   }
 
   const now = new Date();
+  const accepted = status.isValid || isTestSetAlreadyAcceptedMessage(status.statusDescription);
   return updateDocumentRecord(params.documentType, record.id, {
-    status: status.isValid ? "ACCEPTED" : "REJECTED",
+    status: accepted ? "ACCEPTED" : "REJECTED",
     statusDescription: status.statusDescription,
-    acceptedAt: status.isValid ? now : null,
-    rejectedAt: status.isValid ? null : now,
+    acceptedAt: accepted ? now : null,
+    rejectedAt: accepted ? null : now,
     errorMessage: status.errors?.map((e) => e.description).join("; ") || null,
   });
 }

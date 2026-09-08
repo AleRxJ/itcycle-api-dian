@@ -40,6 +40,26 @@ export function reconstructDocumentForResend(signedXml: string, documentNumber: 
   return { xml: signedXml, signedXml, documentNumber, uuid };
 }
 
+/**
+ * The DIAN only requires ONE accepted document per type to flip a "modo de
+ * operación" from "En proceso" to "Aceptado" - it does not wait for the full
+ * habilitación batch. Once that happens, every further SendTestSetAsync
+ * document against the same testSetId comes back with `isValid: false` and
+ * this exact message, even though nothing is actually wrong with the
+ * document itself - habilitación is just already done. Treating that as a
+ * genuine REJECTED (the naive isValid-based mapping) is wrong two ways: it
+ * shows as a red rejection in test-matrix UIs for something that isn't a
+ * failure, and — more importantly — a REJECTED invoice can't be referenced
+ * by a credit/debit note (see createCreditNote/createDebitNote's own
+ * ACCEPTED check), so every note in the same run fails as an unrelated-
+ * looking cascade. Both call sites that turn `isValid` into a persisted
+ * ACCEPTED/REJECTED status route through this so the canonical status is
+ * correct everywhere at once, not just cosmetically relabeled downstream.
+ */
+export function isTestSetAlreadyAcceptedMessage(statusDescription: string | null | undefined): boolean {
+  return /se encuentra aceptado/i.test(statusDescription ?? "");
+}
+
 export interface SentStatusFields {
   status: "SENT" | "ACCEPTED" | "REJECTED";
   trackId: string | null;
@@ -75,11 +95,12 @@ export function computeSentStatusFields(response: DianSendResponse): SentStatusF
       errorMessage: null,
     };
   }
+  const accepted = response.isValid || isTestSetAlreadyAcceptedMessage(response.statusDescription);
   return {
-    status: response.isValid ? "ACCEPTED" : "REJECTED",
+    status: accepted ? "ACCEPTED" : "REJECTED",
     trackId: null,
     statusDescription: response.statusDescription ?? null,
-    acceptedAt: response.isValid ? new Date() : null,
+    acceptedAt: accepted ? new Date() : null,
     errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
   };
 }
