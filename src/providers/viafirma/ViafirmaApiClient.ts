@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 
 import OAuth from "oauth-1.0a";
 
+import { CertificateProviderTechnicalError } from "../certificates/CertificateProviderRegistry.js";
 import type {
   ViafirmaAvailableProfile,
   ViafirmaCreateRequestParams,
@@ -71,17 +72,34 @@ export class ViafirmaApiClient {
       } catch {
         // Non-JSON body - no clean message to extract.
       }
-      throw new Error(cleanMessage || `Viafirma request failed (${response.status} ${path}): ${rawBody.slice(0, 500)}`);
+      // A CertificateProviderTechnicalError (not a bare Error) so
+      // CertificateProviderRegistry's fallback rule can key off it (see that
+      // class's own doc comment) - a bare Error was silently invisible to
+      // fallbackForNewRequestFailure. `.message` is always short and safe to
+      // show a user; the raw body (which can be an entire HTML page from a
+      // Sandbox quirk - see below) goes on `.cause` instead, never inline.
+      throw new CertificateProviderTechnicalError(
+        cleanMessage || `Viafirma request failed (status ${response.status}). Please try again shortly.`,
+        "viafirma",
+        { status: response.status, path, rawBody: rawBody.slice(0, 2000) },
+      );
     }
 
     try {
       return JSON.parse(rawBody) as T;
     } catch {
-      // A 2xx status with a non-JSON body (seen from Viafirma Sandbox on
-      // some paths, e.g. an HTML error page served with a 200) — surface
-      // the status/snippet instead of a bare "Unexpected token" parse error.
-      throw new Error(
-        `Viafirma returned a non-JSON 2xx response (${response.status} ${path}): ${rawBody.slice(0, 500)}`,
+      // A 2xx status with a non-JSON body — seen from Viafirma Sandbox on
+      // some paths (e.g. an entire HTML page, sometimes even a pre-filled
+      // "nueva solicitud" web form) instead of the documented JSON. This
+      // used to embed that raw HTML directly in the thrown Error's own
+      // `.message`, which is what a caller shows verbatim to an end user -
+      // see this file's own history for the actual incident. Same fix as
+      // the branch above: clean message on `.message`, full detail on
+      // `.cause` only.
+      throw new CertificateProviderTechnicalError(
+        "Viafirma returned an unexpected response. Please try again shortly, or contact support if this persists.",
+        "viafirma",
+        { status: response.status, path, rawBody: rawBody.slice(0, 2000) },
       );
     }
   }
@@ -150,7 +168,11 @@ export class ViafirmaApiClient {
     const response = await fetch(url, { headers: this.authHeader(url, "GET") });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`Viafirma P7B download failed (${response.status}): ${body}`);
+      throw new CertificateProviderTechnicalError(
+        `Failed to download the certificate from Viafirma (status ${response.status}). Please try again shortly.`,
+        "viafirma",
+        { status: response.status, url, body: body.slice(0, 2000) },
+      );
     }
     return Buffer.from(await response.arrayBuffer());
   }

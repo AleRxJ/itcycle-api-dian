@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 
+import { CertificateProviderTechnicalError } from "./providers/certificates/CertificateProviderRegistry.js";
 import { startContingencyRetryScheduler } from "./jobs/contingencyRetry.job.js";
 import { startFirmaPassIssuanceScheduler } from "./jobs/firmaPassIssuance.job.js";
 import { startViafirmaIssuanceScheduler } from "./jobs/viafirmaIssuance.job.js";
@@ -23,6 +24,29 @@ const app = Fastify({
 });
 
 app.get("/health", async () => ({ status: "ok" }));
+
+// A CertificateProviderTechnicalError's own `.message` is already a clean,
+// English, user-safe summary (see ViafirmaApiClient.ts's own comment on why
+// it stopped embedding a provider's raw HTML/body there) - Fastify's DEFAULT
+// error handler would still just serialize {statusCode, error: "Internal
+// Server Error", message}, giving Ohnix nothing to tell "a technical
+// provider hiccup" apart from any other 500 without string-matching the
+// message. `error` here is the one deliberately machine-readable field
+// (mirrors Ohnix's own ApiError.code convention) - Ohnix's
+// viafirmaProvisioning.service.js keys off it to show a translated message
+// instead of this English fallback verbatim, in whatever language the user
+// has Ohnix set to.
+app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof CertificateProviderTechnicalError) {
+    return reply.code(502).send({
+      statusCode: 502,
+      error: "certificate_provider_technical_error",
+      provider: error.provider,
+      message: error.message,
+    });
+  }
+  return reply.send(error);
+});
 
 await app.register(async (devRoutes) => {
   devRoutes.addHook("onRequest", requireDevApiKey);
