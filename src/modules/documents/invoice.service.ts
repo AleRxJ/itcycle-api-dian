@@ -6,9 +6,11 @@ import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 import type { DocumentXmlStore } from "../../providers/documents/DocumentXmlStore.js";
+import type { RawResponseStore } from "../../providers/documents/RawResponseStore.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
+import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 
@@ -30,6 +32,8 @@ export interface DocumentServiceDeps {
   createProvider?: (config: DianKitConfig) => DianProvider;
   /** @defaultValue a LocalFileDocumentXmlStore over DOCUMENTS_DIR */
   xmlStore?: DocumentXmlStore;
+  /** @defaultValue a LocalFileRawResponseStore over RAW_RESPONSES_DIR */
+  rawResponseStore?: RawResponseStore;
 }
 
 /**
@@ -44,6 +48,7 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
   const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.invoice.findUnique({
@@ -147,6 +152,11 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
     }
 
     const { response } = outcome;
+    // Saved unconditionally, not just on rejection - the one time this
+    // would have actually helped (a REJECTED invoice with no
+    // statusDescription and no errors at all) is exactly the case where you
+    // can't tell in advance you'll need it.
+    await rawResponseStore.save(xmlReference, response.rawResponse);
     return await prisma.invoice.update({
       where: { id: invoiceRecord.id },
       data: {
@@ -154,6 +164,7 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
         prefix: numbering.prefix,
         cufe: document.uuid,
         xmlReference,
+        dianResponseReference: xmlReference,
         simulated,
         issuedAt: new Date(),
         sentAt: new Date(),
@@ -192,6 +203,7 @@ export async function retryInvoiceSend(
   const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const invoice = await prisma.invoice.findFirst({ where: { id, companyId } });
@@ -230,11 +242,13 @@ export async function retryInvoiceSend(
   }
 
   const { response } = outcome;
+  await rawResponseStore.save(invoice.xmlReference, response.rawResponse);
   return await prisma.invoice.update({
     where: { id: invoice.id },
     data: {
       simulated,
       sentAt: new Date(),
+      dianResponseReference: invoice.xmlReference,
       ...computeSentStatusFields(response),
     },
     include: { certificate: true },

@@ -12,6 +12,7 @@ dist/
 *.password
 /certs/
 /documents/
+/dian-responses/
 .env
 .env.*
 !.env.example

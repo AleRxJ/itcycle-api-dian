@@ -6,9 +6,11 @@ import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import type { DianProvider } from "../../providers/dian/DianProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 import type { DocumentXmlStore } from "../../providers/documents/DocumentXmlStore.js";
+import type { RawResponseStore } from "../../providers/documents/RawResponseStore.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
+import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
 import { reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 
@@ -30,6 +32,8 @@ export interface DocumentServiceDeps {
   createProvider?: (config: DianKitConfig) => DianProvider;
   /** @defaultValue a LocalFileDocumentXmlStore over DOCUMENTS_DIR */
   xmlStore?: DocumentXmlStore;
+  /** @defaultValue a LocalFileRawResponseStore over RAW_RESPONSES_DIR */
+  rawResponseStore?: RawResponseStore;
 }
 
 /**
@@ -50,6 +54,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
   const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.supportDocument.findUnique({
@@ -136,6 +141,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
     }
 
     const { response } = outcome;
+    await rawResponseStore.save(xmlReference, response.rawResponse);
     return await prisma.supportDocument.update({
       where: { id: supportDocumentRecord.id },
       data: {
@@ -143,6 +149,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
         prefix: numbering.prefix,
         cufe: document.uuid,
         xmlReference,
+        dianResponseReference: xmlReference,
         status: response.isValid ? "ACCEPTED" : "REJECTED",
         simulated,
         issuedAt: new Date(),
@@ -180,6 +187,7 @@ export async function retrySupportDocumentSend(
   const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const supportDocument = await prisma.supportDocument.findFirst({ where: { id, companyId } });
@@ -213,12 +221,14 @@ export async function retrySupportDocumentSend(
   }
 
   const { response } = outcome;
+  await rawResponseStore.save(supportDocument.xmlReference, response.rawResponse);
   return await prisma.supportDocument.update({
     where: { id: supportDocument.id },
     data: {
       status: response.isValid ? "ACCEPTED" : "REJECTED",
       simulated,
       sentAt: new Date(),
+      dianResponseReference: supportDocument.xmlReference,
       acceptedAt: response.isValid ? new Date() : null,
       errorMessage: response.errors?.map((e) => e.description).join("; ") || null,
     },

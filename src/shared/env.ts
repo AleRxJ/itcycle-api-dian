@@ -7,6 +7,8 @@ export const env = {
   certificatesDir: process.env.CERTIFICATES_DIR ?? "./certs",
   /** Local directory for LocalFileDocumentXmlStore (signed document XML — not a secret, but never in git). */
   documentsDir: process.env.DOCUMENTS_DIR ?? "./documents",
+  /** Local directory for LocalFileRawResponseStore (raw DIAN SOAP responses — not a secret, but never in git). */
+  rawResponsesDir: process.env.RAW_RESPONSES_DIR ?? "./dian-responses",
   /**
    * "file" (default) uses CERTIFICATES_DIR/DOCUMENTS_DIR on local disk —
    * fine for a host with a persistent disk, wrong for one without (e.g.

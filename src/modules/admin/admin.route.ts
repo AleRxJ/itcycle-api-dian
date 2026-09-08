@@ -19,6 +19,7 @@ import {
   createCompany,
   createNumberingResolution,
   getCertificateProviderStatus,
+  getDianRawResponse,
   getDianReadiness,
   getFirmaPassStatus,
   listTestSubmissions,
@@ -29,6 +30,7 @@ import {
   uploadCertificate,
   type RefreshableDocumentType,
 } from "./admin.service.js";
+import type { NumberedDocumentType } from "../documents/dianConfig.service.js";
 import {
   confirmValidation,
   getNextPendingValidation,
@@ -305,6 +307,31 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       } catch (error) {
         request.log.error(error);
         return reply.code(502).send({ error: "dian_status_refresh_failed", message: error instanceof Error ? error.message : String(error) });
+      }
+    },
+  );
+
+  // The raw DIAN SOAP response actually stored for a document (see
+  // admin.service.ts's getDianRawResponse) - the only way to see why DIAN
+  // rejected something when statusDescription/errorMessage came back empty.
+  const RAW_RESPONSE_TYPES: NumberedDocumentType[] = ["01", "91", "92", "05"];
+  app.get<{ Params: { id: string; documentType: string; docId: string } }>(
+    "/api/v1/admin/companies/:id/documents/:documentType/:docId/raw-response",
+    async (request, reply) => {
+      const { documentType } = request.params;
+      if (!RAW_RESPONSE_TYPES.includes(documentType as NumberedDocumentType)) {
+        return reply.code(400).send({ error: "invalid_document_type", message: `documentType must be one of ${RAW_RESPONSE_TYPES.join(", ")}` });
+      }
+      try {
+        const rawResponse = await getDianRawResponse({
+          companyId: request.params.id,
+          documentType: documentType as NumberedDocumentType,
+          id: request.params.docId,
+        });
+        return reply.type("application/xml").send(rawResponse);
+      } catch (error) {
+        request.log.error(error);
+        return reply.code(404).send({ error: "raw_response_not_found", message: error instanceof Error ? error.message : String(error) });
       }
     },
   );

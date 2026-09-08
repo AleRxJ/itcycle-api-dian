@@ -373,6 +373,23 @@ model DocumentXmlBlob {
   updatedAt DateTime @updatedAt
 }
 
+/// Postgres-backed RawResponseStore row (see
+/// src/providers/documents/PrismaRawResponseStore.ts) - the raw SOAP XML
+/// DIAN actually returned for a send/status-poll call. `reference` matches
+/// Invoice/CreditNote/DebitNote/SupportDocument.dianResponseReference - a
+/// field that existed in the schema from the start but was never actually
+/// written until a real DIAN rejection came back with no statusDescription
+/// or errors at all, and there was no way to see what DIAN's raw response
+/// actually said. Upserted (not appended) - only the LATEST response for a
+/// document is kept, same as statusDescription itself.
+model DianResponseBlob {
+  reference   String @id
+  rawResponse String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// A Documento Soporte (DIAN type 05) — a self-issued document for
 /// acquisitions from suppliers not obligated to issue an electronic invoice.
 /// Unlike CreditNote/DebitNote, this is standalone: it does not reference or

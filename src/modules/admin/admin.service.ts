@@ -6,6 +6,7 @@ import { generateApiKey } from "../../shared/apiKeyAuth.js";
 import { env } from "../../shared/env.js";
 import { loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
 import { isStillValidatingMessage, isTestSetAlreadyAcceptedMessage } from "../documents/documentSend.service.js";
+import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 
@@ -414,11 +415,16 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
     return updateDocumentRecord(params.documentType, record.id, { statusDescription: status.statusDescription });
   }
 
+  if (record.xmlReference) {
+    await createDefaultRawResponseStore().save(record.xmlReference, status.rawResponse);
+  }
+
   const now = new Date();
   const accepted = status.isValid || isTestSetAlreadyAcceptedMessage(status.statusDescription);
   return updateDocumentRecord(params.documentType, record.id, {
     status: accepted ? "ACCEPTED" : "REJECTED",
     statusDescription: status.statusDescription,
+    dianResponseReference: record.xmlReference,
     acceptedAt: accepted ? now : null,
     rejectedAt: accepted ? null : now,
     errorMessage: status.errors?.map((e) => e.description).join("; ") || null,
@@ -436,9 +442,48 @@ function findDocumentRecord(documentType: RefreshableDocumentType, companyId: st
   }
 }
 
+function findAnyDocumentRecord(documentType: NumberedDocumentType, companyId: string, id: string) {
+  switch (documentType) {
+    case "01":
+      return prisma.invoice.findFirst({ where: { id, companyId } });
+    case "91":
+      return prisma.creditNote.findFirst({ where: { id, companyId } });
+    case "92":
+      return prisma.debitNote.findFirst({ where: { id, companyId } });
+    case "05":
+      return prisma.supportDocument.findFirst({ where: { id, companyId } });
+  }
+}
+
+/**
+ * Fetches the raw DIAN SOAP response actually stored for a document (see
+ * documentSend.service.ts and this file's own refreshDocumentStatus for
+ * where dianResponseReference/RawResponseStore get written) - the only way
+ * to see why DIAN rejected something when statusDescription/errorMessage
+ * came back empty (which does happen for a genuine rejection, not just a
+ * bug - see the 2026-09-08 incident this was built for).
+ */
+export interface GetDianRawResponseParams {
+  companyId: string;
+  documentType: NumberedDocumentType;
+  id: string;
+}
+
+export async function getDianRawResponse(params: GetDianRawResponseParams) {
+  const record = await findAnyDocumentRecord(params.documentType, params.companyId, params.id);
+  if (!record) {
+    throw new Error(`Document ${params.id} (type ${params.documentType}) not found for company ${params.companyId}`);
+  }
+  if (!record.dianResponseReference) {
+    throw new Error(`Document ${params.id} has no raw DIAN response stored (sent before this feature existed, or never actually sent).`);
+  }
+  return createDefaultRawResponseStore().get(record.dianResponseReference);
+}
+
 interface DocumentStatusUpdate {
   status?: "ACCEPTED" | "REJECTED";
   statusDescription: string | null;
+  dianResponseReference?: string | null;
   acceptedAt?: Date | null;
   rejectedAt?: Date | null;
   errorMessage?: string | null;

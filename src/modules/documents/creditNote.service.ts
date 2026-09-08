@@ -7,6 +7,7 @@ import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvide
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
+import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
@@ -37,6 +38,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
   const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const existing = await prisma.creditNote.findUnique({
@@ -145,6 +147,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
     }
 
     const { response } = outcome;
+    await rawResponseStore.save(xmlReference, response.rawResponse);
     return await prisma.creditNote.update({
       where: { id: creditNoteRecord.id },
       data: {
@@ -152,6 +155,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
         prefix: numbering.prefix,
         cufe: document.uuid,
         xmlReference,
+        dianResponseReference: xmlReference,
         simulated,
         issuedAt: new Date(),
         sentAt: new Date(),
@@ -182,6 +186,7 @@ export async function retryCreditNoteSend(
   const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
   const createProvider = deps.createProvider ?? defaultCreateProvider;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
   const simulated = !deps.createProvider && env.dianSimulationMode;
 
   const creditNote = await prisma.creditNote.findFirst({ where: { id, companyId } });
@@ -217,11 +222,13 @@ export async function retryCreditNoteSend(
   }
 
   const { response } = outcome;
+  await rawResponseStore.save(creditNote.xmlReference, response.rawResponse);
   return await prisma.creditNote.update({
     where: { id: creditNote.id },
     data: {
       simulated,
       sentAt: new Date(),
+      dianResponseReference: creditNote.xmlReference,
       ...computeSentStatusFields(response),
     },
     include: { certificate: true },
