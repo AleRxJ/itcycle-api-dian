@@ -187,7 +187,7 @@ describe("mapViafirmaStatus", () => {
     ["docRequired", "awaiting_documents"],
     ["docUploaded", "pending_provider_review"],
     ["checking", "pending_provider_review"],
-    ["rues_error", "issuance_failed"],
+    ["rues_error", "rues_verification_failed"],
     ["fail", "issuance_failed"],
     ["Generated_Not_Downloaded", "issued_ready_to_finalize"],
     ["Generated_And_Downloaded", "active"],

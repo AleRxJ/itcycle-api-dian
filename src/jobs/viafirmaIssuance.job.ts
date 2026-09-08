@@ -74,7 +74,11 @@ export async function finalizePendingViafirmaCertificates(logger?: FastifyBaseLo
           data: { status: "ACTIVE", expiresAt },
         });
         summary.finalized += 1;
-      } else if (internalStatus === "identity_rejected" || internalStatus === "issuance_failed") {
+      } else if (
+        internalStatus === "identity_rejected" ||
+        internalStatus === "issuance_failed" ||
+        internalStatus === "rues_verification_failed"
+      ) {
         await secretStore.delete(row.secretReference);
         await prisma.certificate.delete({ where: { id: row.id } });
         summary.failed += 1;

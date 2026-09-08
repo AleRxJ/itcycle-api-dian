@@ -58,6 +58,8 @@ export type InternalCertificateStatus =
   | "active"
   /** Issuance failed for a reason that is NOT a rejection of the applicant's identity/data (e.g. a CA-side signing error). Provider-specific `failureReason` should always be set alongside this. */
   | "issuance_failed"
+  /** The provider could not verify the applicant's NIT/organization against RUES (Cámara de Comercio) - e.g. Viafirma's `rues_error`. Split out from the generic "issuance_failed" bucket because it's the one failure an applicant can usually FIX themselves (a malformed/mistyped NIT) and retry, unlike a CA-side error - see the 2026-09-08 incident this was split out for: a real request was rejected this way because of a NIT-formatting bug on Ohnix's own side, and the generic "issuance_failed" copy gave the user no hint that their own data was the problem. */
+  | "rues_verification_failed"
   /** The certificate was revoked (by the subscriber, an operator, or automatically on expiry-adjacent policy). */
   | "revoked"
   /** The certificate reached the end of its validity period. Distinct from "revoked" (an explicit action) even though both mean the certificate can no longer be used to sign. */
@@ -81,7 +83,7 @@ export type InternalCertificateStatus =
  * time — never from a status returned here.
  */
 export function isFunctionalRejection(status: InternalCertificateStatus): boolean {
-  return status === "identity_rejected" || status === "issuance_failed";
+  return status === "identity_rejected" || status === "issuance_failed" || status === "rues_verification_failed";
 }
 
 export interface CertificateProviderStatusResult {

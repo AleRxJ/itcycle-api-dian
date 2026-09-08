@@ -276,6 +276,10 @@ export function mapViafirmaStatus(code: string): InternalCertificateStatus {
     case "docRequired":
       return "awaiting_documents";
     case "rues_error":
+      // Split from "fail" - see InternalCertificateStatus's own doc comment.
+      // The one failure state an applicant can usually fix themselves
+      // (a wrong/malformed NIT) and retry, not a generic CA-side error.
+      return "rues_verification_failed";
     case "fail":
       return "issuance_failed";
     case "Generated_Not_Downloaded":
