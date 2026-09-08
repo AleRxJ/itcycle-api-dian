@@ -9,8 +9,18 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Only `prisma migrate *` commands use this - the query engine always uses
+  // `url` above. Neon's pooled endpoint (the "-pooler" host in DATABASE_URL)
+  // doesn't reliably support the session-level pg_advisory_lock() migrate
+  // uses to serialize concurrent migrations - a pooler can hand the same
+  // backend connection to a different client mid-lock, leaving it stuck
+  // forever (see https://pris.ly/d/migrate-advisory-locking, and the 2026-09-08
+  // Render deploy that failed with P1002 until the stuck session was killed
+  // by hand). DIRECT_URL must be Neon's direct (non-pooled) connection
+  // string - same credentials/db, just without "-pooler" in the host.
+  directUrl = env("DIRECT_URL")
 }
 
 enum RecordStatus {
