@@ -52,6 +52,14 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
     include: { certificate: true },
   });
   if (existing) {
+    // See invoice.service.ts#createInvoice's identical check for the full
+    // rationale — a still-PROCESSING row here means a concurrent/interrupted
+    // request, not a safe idempotent replay.
+    if (existing.status === "PROCESSING") {
+      throw new Error(
+        `Credit note ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
+      );
+    }
     return existing;
   }
 
@@ -180,7 +188,9 @@ export async function retryCreditNoteSend(
   if (!creditNote) {
     throw new Error(`Credit note ${id} not found for company ${companyId}`);
   }
-  if (creditNote.status !== "CONTINGENCY") {
+  // Also retryable: SENT with no trackId - see retryInvoiceSend's identical check.
+  const stuckWithoutTrackId = creditNote.status === "SENT" && !creditNote.trackId;
+  if (creditNote.status !== "CONTINGENCY" && !stuckWithoutTrackId) {
     throw new Error(`Credit note ${id} is not in CONTINGENCY (status=${creditNote.status}) — nothing to retry.`);
   }
   if (!creditNote.xmlReference || !creditNote.noteNumber || !creditNote.cufe) {

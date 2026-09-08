@@ -13,6 +13,7 @@ import { requireAdminApiKey } from "./shared/adminAuth.js";
 import { requireApiKey } from "./shared/apiKeyAuth.js";
 import { requireDevApiKey } from "./shared/devAuth.js";
 import { env } from "./shared/env.js";
+import { reconcileOrphanedProcessingDocuments } from "./shared/startupReconcile.js";
 
 const app = Fastify({
   logger:
@@ -45,6 +46,8 @@ await app.register(async (adminRoutes) => {
   adminRoutes.addHook("onRequest", requireAdminApiKey);
   await registerAdminRoutes(adminRoutes);
 });
+
+reconcileOrphanedProcessingDocuments(app.log).catch((err) => app.log.error(err, "Failed to reconcile orphaned PROCESSING documents"));
 
 startContingencyRetryScheduler(app.log);
 startFirmaPassIssuanceScheduler(app.log);

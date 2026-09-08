@@ -60,6 +60,23 @@ export function isTestSetAlreadyAcceptedMessage(statusDescription: string | null
   return /se encuentra aceptado/i.test(statusDescription ?? "");
 }
 
+/**
+ * A second, distinct non-terminal case DIAN's async endpoints can return:
+ * the batch was accepted for later validation but DIAN's ack carries no
+ * ZipKey/XmlFileName (see dian-engine's parseSendResponse — that's the only
+ * source of `trackId`), so there is nothing to poll GetStatusZip with. Since
+ * `computeSentStatusFields` only recognizes "SENT" via a present `trackId`,
+ * this used to fall straight into the naive isValid-based mapping and get
+ * recorded as a permanent REJECTED, even though DIAN never actually
+ * rejected it — it just hasn't validated it yet. The only way to learn the
+ * real verdict is to resend later (see invoice/creditNote/debitNote
+ * .service.ts's retryXxxSend and contingencyRetry.job.ts, which now also
+ * sweeps this case, not just CONTINGENCY).
+ */
+export function isStillValidatingMessage(statusDescription: string | null | undefined): boolean {
+  return /en proceso de validaci/i.test(statusDescription ?? "");
+}
+
 export interface SentStatusFields {
   status: "SENT" | "ACCEPTED" | "REJECTED";
   trackId: string | null;
@@ -90,6 +107,15 @@ export function computeSentStatusFields(response: DianSendResponse): SentStatusF
     return {
       status: "SENT",
       trackId: response.trackId,
+      statusDescription: response.statusDescription ?? null,
+      acceptedAt: null,
+      errorMessage: null,
+    };
+  }
+  if (!response.isValid && isStillValidatingMessage(response.statusDescription)) {
+    return {
+      status: "SENT",
+      trackId: null,
       statusDescription: response.statusDescription ?? null,
       acceptedAt: null,
       errorMessage: null,

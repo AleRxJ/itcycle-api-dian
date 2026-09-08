@@ -19,14 +19,19 @@ export interface ContingencyRetrySummary {
 /**
  * Sweeps every company for CONTINGENCY invoices/credit notes/debit notes
  * (documents whose send() previously failed because DIAN itself was
- * unreachable — see documentSend.service.ts) and retries each one via the
- * same retryXxxSend() the manual /retry-send endpoints use.
+ * unreachable — see documentSend.service.ts) — plus invoices/credit notes/
+ * debit notes stuck SENT with no trackId (DIAN accepted the batch for async
+ * validation but issued no ZipKey, so there's nothing to poll GetStatusZip
+ * with — see documentSend.service.ts's isStillValidatingMessage) — and
+ * retries each one via the same retryXxxSend() the manual /retry-send
+ * endpoints use. Support documents never take the async path (see
+ * supportDocument.service.ts), so they're only ever swept for CONTINGENCY.
  *
  * No queue system (BullMQ/Redis) on purpose: at the volume this replaces a
- * manual click with a periodic sweep — CONTINGENCY events are meant to be
- * rare (a DIAN outage, not routine traffic), so a fixed-interval full sweep
- * is proportionate. One document's failure never stops the sweep for the
- * rest — each retry is isolated in its own try/catch.
+ * manual click with a periodic sweep — these events are meant to be rare (a
+ * DIAN outage or a slow validation queue, not routine traffic), so a
+ * fixed-interval full sweep is proportionate. One document's failure never
+ * stops the sweep for the rest — each retry is isolated in its own try/catch.
  */
 export async function retryAllContingencyDocuments(
   logger?: FastifyBaseLogger,
@@ -34,10 +39,11 @@ export async function retryAllContingencyDocuments(
 ): Promise<ContingencyRetrySummary> {
   const summary: ContingencyRetrySummary = { attempted: 0, accepted: 0, stillContingency: 0, failed: 0 };
 
+  const retryableWhere = { OR: [{ status: "CONTINGENCY" as const }, { status: "SENT" as const, trackId: null }] };
   const [invoices, creditNotes, debitNotes, supportDocuments] = await Promise.all([
-    prisma.invoice.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
-    prisma.creditNote.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
-    prisma.debitNote.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
+    prisma.invoice.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
+    prisma.creditNote.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
+    prisma.debitNote.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
     prisma.supportDocument.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
   ]);
 
@@ -89,7 +95,10 @@ export async function retryAllContingencyDocuments(
 }
 
 function tally(summary: ContingencyRetrySummary, status: string): void {
-  if (status === "CONTINGENCY") {
+  if (status === "CONTINGENCY" || status === "SENT") {
+    // CONTINGENCY: DIAN still unreachable. SENT (no trackId): DIAN accepted
+    // the batch but still hasn't validated it - either way, not resolved
+    // yet, next sweep tries again.
     summary.stillContingency += 1;
   } else {
     // ACCEPTED or REJECTED — either way DIAN responded, the sweep's job is done for this document.

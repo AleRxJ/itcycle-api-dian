@@ -48,6 +48,14 @@ export async function createDebitNote(params: CreateDebitNoteParams, deps: Docum
     include: { certificate: true },
   });
   if (existing) {
+    // See invoice.service.ts#createInvoice's identical check for the full
+    // rationale — a still-PROCESSING row here means a concurrent/interrupted
+    // request, not a safe idempotent replay.
+    if (existing.status === "PROCESSING") {
+      throw new Error(
+        `Debit note ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
+      );
+    }
     return existing;
   }
 
@@ -176,7 +184,9 @@ export async function retryDebitNoteSend(
   if (!debitNote) {
     throw new Error(`Debit note ${id} not found for company ${companyId}`);
   }
-  if (debitNote.status !== "CONTINGENCY") {
+  // Also retryable: SENT with no trackId - see retryInvoiceSend's identical check.
+  const stuckWithoutTrackId = debitNote.status === "SENT" && !debitNote.trackId;
+  if (debitNote.status !== "CONTINGENCY" && !stuckWithoutTrackId) {
     throw new Error(`Debit note ${id} is not in CONTINGENCY (status=${debitNote.status}) — nothing to retry.`);
   }
   if (!debitNote.xmlReference || !debitNote.noteNumber || !debitNote.cufe) {

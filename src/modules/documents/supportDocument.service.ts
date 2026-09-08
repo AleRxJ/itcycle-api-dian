@@ -65,6 +65,14 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
     include: { certificate: true },
   });
   if (existing) {
+    // See invoice.service.ts#createInvoice's identical check for the full
+    // rationale — a still-PROCESSING row here means a concurrent/interrupted
+    // request, not a safe idempotent replay.
+    if (existing.status === "PROCESSING") {
+      throw new Error(
+        `Support document ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
+      );
+    }
     // Idempotent replay: never re-send the same internalReference to DIAN,
     // and never burn a second document number for it.
     return existing;

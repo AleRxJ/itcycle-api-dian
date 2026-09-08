@@ -60,6 +60,23 @@ export async function createInvoice(params: CreateInvoiceParams, deps: DocumentS
     include: { certificate: true },
   });
   if (existing) {
+    if (existing.status === "PROCESSING") {
+      // "PROCESSING" only exists between this function's own `create` and its
+      // final status update (below) — a normal request never returns it, the
+      // try/catch always resolves to a terminal status or ERROR first. Seeing
+      // it here means a DIFFERENT invocation for this exact internalReference
+      // is still mid-flight (e.g. the caller timed out waiting for a slow
+      // DIAN round-trip and retried) or was orphaned by a crash/redeploy
+      // (see reconcileOrphanedProcessingDocuments in shared/startupReconcile.ts,
+      // which sweeps the latter case at startup). Returning it as-is used to
+      // silently hand back a non-terminal snapshot that looked like a normal
+      // response, which is how it ended up recorded as a confusing generic
+      // "returned status PROCESSING" failure downstream — this way the
+      // caller gets an honest, actionable error instead.
+      throw new Error(
+        `Invoice ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
+      );
+    }
     // Idempotent replay: never re-send the same internalReference to DIAN,
     // and never burn a second document number for it.
     return existing;
@@ -181,7 +198,12 @@ export async function retryInvoiceSend(
   if (!invoice) {
     throw new Error(`Invoice ${id} not found for company ${companyId}`);
   }
-  if (invoice.status !== "CONTINGENCY") {
+  // Also retryable: SENT with no trackId - DIAN accepted the batch for async
+  // validation but issued no ZipKey to poll by (see documentSend.service.ts's
+  // isStillValidatingMessage). That's just as stuck as CONTINGENCY - only a
+  // resend can move it forward - so contingencyRetry.job.ts sweeps both.
+  const stuckWithoutTrackId = invoice.status === "SENT" && !invoice.trackId;
+  if (invoice.status !== "CONTINGENCY" && !stuckWithoutTrackId) {
     throw new Error(`Invoice ${id} is not in CONTINGENCY (status=${invoice.status}) — nothing to retry.`);
   }
   if (!invoice.xmlReference || !invoice.invoiceNumber || !invoice.cufe) {

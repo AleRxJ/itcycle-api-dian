@@ -387,7 +387,14 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
     return record;
   }
   if (!record.trackId) {
-    throw new Error(`Document ${params.id} is SENT but has no trackId — cannot query DIAN status.`);
+    // Legitimately possible now, not just a caller mistake: DIAN accepted the
+    // batch for async validation but issued no ZipKey (see
+    // documentSend.service.ts's isStillValidatingMessage) - there is nothing
+    // to poll GetStatusZip with. Only a resend can move this forward (see
+    // retryXxxSend + contingencyRetry.job.ts, which sweeps this case), so
+    // this just returns the record unchanged instead of throwing - safe to
+    // call repeatedly, exactly like every other branch here.
+    return record;
   }
 
   const secretStore = createDefaultCertificateSecretStore();
