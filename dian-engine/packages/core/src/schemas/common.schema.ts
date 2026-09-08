@@ -159,6 +159,7 @@ export const InvoiceLineSchema = z.object({
   quantity: z.number().positive(),
   unitCode: z.string().default("EA"),
   description: z.string().min(1),
+  standardItemCode: z.string().default("N/A"),
   price: z.number().positive(),
   lineExtensionAmount: z.number().nonnegative(),
   allowanceCharges: z.array(AllowanceChargeSchema).optional(),

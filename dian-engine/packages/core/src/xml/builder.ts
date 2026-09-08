@@ -418,6 +418,15 @@ function addLineNode(
   // Item
   const item = node.ele(NS.CAC, "Item");
   item.ele(NS.CBC, "Description").txt(line.description);
+  // DIAN requires this group on every line (FAZ09 rejects its absence) -
+  // schemeID="999" is DIAN's own "Estándar de adopción del contribuyente",
+  // so any self-adopted code is valid here, not necessarily a formal UNSPSC one.
+  item
+    .ele(NS.CAC, "StandardItemIdentification")
+    .ele(NS.CBC, "ID")
+    .att("schemeID", "999")
+    .att("schemeName", "Estándar de adopción del contribuyente")
+    .txt(line.standardItemCode ?? "N/A");
 
   // Price
   const price = node.ele(NS.CAC, "Price");

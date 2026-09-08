@@ -65,9 +65,16 @@ export function formatPercent(value: number): string {
  * ```
  */
 export function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
+  // UTC, not local time: every date this formats (numbering StartDate/
+  // EndDate, IssueDate, etc.) is stored and compared as a plain calendar
+  // date in UTC. Using the local-timezone getters here shifted every date
+  // back by one day on any server running west of UTC (e.g. Colombia,
+  // UTC-5) - a stored "2019-01-19T00:00:00.000Z" numbering resolution
+  // start date rendered as "2019-01-18", which DIAN rejects outright
+  // (FAB07b/FAB08b: "fecha ... no corresponde a la ... vigente").
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
@@ -86,8 +93,19 @@ export function formatDate(date: Date): string {
  * ```
  */
 export function formatTime(date: Date, utcOffset = "-05:00"): string {
-  const h = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  const s = String(date.getSeconds()).padStart(2, "0");
+  // Wall-clock time for `utcOffset`, computed from the UTC instant - not
+  // the server's own local timezone (same bug class as formatDate: the
+  // previous getHours()/getMinutes()/getSeconds() only produced Colombia
+  // time by coincidence, when the server's OS timezone happened to also be
+  // UTC-05:00. On any other server timezone this silently produced the
+  // wrong wall-clock time while still claiming the "-05:00" offset.
+  const offsetMatch = /^([+-])(\d{2}):(\d{2})$/.exec(utcOffset);
+  const offsetMinutes = offsetMatch
+    ? (offsetMatch[1] === "-" ? -1 : 1) * (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]))
+    : 0;
+  const shifted = new Date(date.getTime() + offsetMinutes * 60_000);
+  const h = String(shifted.getUTCHours()).padStart(2, "0");
+  const min = String(shifted.getUTCMinutes()).padStart(2, "0");
+  const s = String(shifted.getUTCSeconds()).padStart(2, "0");
   return `${h}:${min}:${s}${utcOffset}`;
 }

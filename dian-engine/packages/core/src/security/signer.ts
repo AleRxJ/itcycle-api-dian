@@ -206,21 +206,22 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
  * @see {@link https://www.dian.gov.co/ | DIAN Anexo Tecnico} for the full specification
  */
 /**
- * Adjusts a Date so that when xadesjs serializes it via `.toISOString()` (UTC),
- * the date portion matches the local date. This prevents DIAN FAD09e rejection
- * when the server timezone differs from Colombia time (UTC-5).
- *
- * xadesjs always serializes SigningTime as UTC (e.g., "2026-04-08T00:30:00Z"),
- * but DIAN compares that date with IssueDate which is formatted in local time.
- * Near midnight, these can be on different calendar dates.
+ * Pins a Date to noon UTC on its own UTC calendar day, so that when xadesjs
+ * serializes it via `.toISOString()` (UTC) the date portion is unambiguous.
+ * This prevents DIAN FAD09e rejection ("fecha de generación de la factura
+ * debe ser igual a la fecha de firma"), which compares SigningTime's UTC
+ * calendar date against IssueDate - itself formatted in UTC (see
+ * `formatDate` in utils/amount.ts). Both sides must agree on the same
+ * calendar-day convention (UTC) - this used to pin to the *local* calendar
+ * day instead, which matched IssueDate only by coincidence, on whichever
+ * server happened to run in Colombia's own UTC-05:00 timezone.
  *
  * @param date - The original signing time
- * @returns A Date adjusted so its UTC date matches the local date
+ * @returns A Date pinned to noon UTC on `date`'s own UTC calendar day
  * @internal
  */
 function adjustSigningTimeForLocalDate(date: Date): Date {
-  const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0);
-  return localDate;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12, 0, 0));
 }
 
 export async function signXml(options: SignXmlOptions): Promise<SignXmlResult> {

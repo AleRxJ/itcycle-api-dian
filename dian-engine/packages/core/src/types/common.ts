@@ -181,6 +181,15 @@ export interface InvoiceLine {
   unitCode?: string;
   /** Description of the good or service */
   description: string;
+  /**
+   * Standard/internal code identifying the good or service (DIAN requires
+   * every line to carry one - "Debe existir el grupo de información de
+   * identificación del bien o servicio", rejection code FAZ09). Rendered as
+   * cac:StandardItemIdentification/cbc:ID with schemeID="999" ("Estándar de
+   * adopción del contribuyente"), so any self-adopted code (not necessarily
+   * a formal UNSPSC code) is valid here. Defaults to "N/A" when omitted.
+   */
+  standardItemCode?: string;
   /** Unit price before taxes */
   price: number;
   /** Total line amount before taxes (quantity * price, adjusted for allowances/charges) */
