@@ -5,7 +5,7 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { generateApiKey } from "../../shared/apiKeyAuth.js";
 import { env } from "../../shared/env.js";
 import { loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
-import { isTestSetAlreadyAcceptedMessage } from "../documents/documentSend.service.js";
+import { isStillValidatingMessage, isTestSetAlreadyAcceptedMessage } from "../documents/documentSend.service.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
 import { SimulatedDianProvider } from "../../providers/dian/SimulatedDianProvider.js";
 
@@ -403,8 +403,14 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
 
   const status = await provider.getStatusZip(record.trackId);
 
-  if (status.statusCode === "66") {
-    // Still processing on DIAN's side - not terminal yet, just refresh the description.
+  if (status.statusCode === "66" || (!status.isValid && isStillValidatingMessage(status.statusDescription))) {
+    // Still processing on DIAN's side - not terminal yet (either DIAN's own
+    // "still processing" code, or the "en proceso de validación" phrasing -
+    // see documentSend.service.ts's isStillValidatingMessage, which this
+    // mirrors so a poll can't terminalize what computeSentStatusFields's own
+    // initial-send check would have treated as non-terminal). Just refresh
+    // the description; a later poll (or contingencyRetry.job.ts's sweep)
+    // tries again.
     return updateDocumentRecord(params.documentType, record.id, { statusDescription: status.statusDescription });
   }
 
