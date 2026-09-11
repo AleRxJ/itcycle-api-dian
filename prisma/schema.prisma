@@ -80,6 +80,7 @@ model Company {
   creditNotes          CreditNote[]
   debitNotes           DebitNote[]
   supportDocuments     SupportDocument[]
+  receiptAcknowledgments ReceiptAcknowledgment[]
   apiKeys              ApiKey[]
 
   @@unique([nit, dv])
@@ -198,6 +199,7 @@ model Certificate {
   creditNotes      CreditNote[]
   debitNotes       DebitNote[]
   supportDocuments SupportDocument[]
+  receiptAcknowledgments ReceiptAcknowledgment[]
 
   @@index([companyId])
 }
@@ -425,4 +427,51 @@ model SupportDocument {
 
   @@unique([companyId, internalReference])
   @@index([companyId, status])
+}
+
+/// A buyer-side acknowledgment event for a THIRD-PARTY supplier's real DIAN
+/// invoice (RADIAN "acuse de recibo" family - Resolución 000012 de 2021,
+/// technical annex not yet verified against this implementation - see
+/// receiptAcknowledgment.xml.ts's own doc comment). Unlike Invoice/CreditNote/
+/// DebitNote/SupportDocument, this does NOT consume a DIAN numbering range
+/// (no numberingId) - ApplicationResponse-family documents aren't numbered.
+/// `simulated` defaults true here (SupportDocument defaults false) because
+/// Phase 1 has no real, non-simulated send path at all for this type - see
+/// receiptAcknowledgment.service.ts#assertSimulationOnly.
+model ReceiptAcknowledgment {
+  id                    String                         @id @default(cuid())
+  companyId             String
+  certificateId         String?
+  internalReference     String // idempotency key, same role as SupportDocument.internalReference
+  eventType             ReceiptAcknowledgmentEventType
+  referencedCufe        String // the SUPPLIER's own invoice CUFE being acknowledged
+  referencedInvoiceId   String? // the supplier's own invoice number, informational only
+  responseCode          String? // free-form: DIAN's real ResponseCode catalogue per event type is unknown pending the annex
+  status                InvoiceStatus                  @default(PENDING)
+  simulated             Boolean                        @default(true)
+  xmlReference          String?
+  dianResponseReference String?
+  issuedAt              DateTime?
+  sentAt                DateTime?
+  acceptedAt            DateTime?
+  rejectedAt            DateTime?
+  errorCode             String?
+  errorMessage          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  certificate Certificate? @relation(fields: [certificateId], references: [id])
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
+  @@index([companyId, referencedCufe])
+}
+
+enum ReceiptAcknowledgmentEventType {
+  ACUSE_RECIBO
+  RECIBO_BIEN
+  ACEPTACION_EXPRESA
+  RECLAMO
 }

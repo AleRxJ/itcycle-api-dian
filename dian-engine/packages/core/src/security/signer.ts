@@ -53,6 +53,14 @@ export interface SignXmlOptions {
   /** Override the signing time. Defaults to `new Date()`.
    *  Should match the document's issueDate to satisfy DIAN rule FAD09e. */
   signingTime?: Date;
+  /** XAdES SignerRole/ClaimedRole value. Defaults to `"supplier"`, correct
+   *  for every document type this library has signed until now (Invoice/
+   *  CreditNote/DebitNote/SupportDocument are all issued by the party DIAN
+   *  considers the "supplier" role, even for SupportDocument's own inverted
+   *  customer/supplier party mapping - see supportDocument.service.ts).
+   *  ReceiptAcknowledgment is the first document type where the SIGNER is
+   *  genuinely the buyer, not the supplier - pass `"buyer"` there. */
+  signerRole?: string;
 }
 
 /**
@@ -156,7 +164,8 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
  *   for all digest computations
  * - **XAdES elements:** SigningTime, SigningCertificate (with SHA-256 digest
  *   and issuer serial), SignaturePolicyIdentifier (DIAN policy URL and hash)
- * - **SignerRole:** "supplier" (as required by DIAN)
+ * - **SignerRole:** "supplier" by default (as required by DIAN for invoices/
+ *   notes/support documents), overridable via {@link SignXmlOptions.signerRole}
  * - **ProductionPlace:** Colombia
  * - **Placement:** The signature is inserted into
  *   `ext:UBLExtensions/ext:UBLExtension[2]/ext:ExtensionContent`
@@ -277,7 +286,7 @@ export async function signXml(options: SignXmlOptions): Promise<SignXmlResult> {
       digestValue: policyHashBase64 ?? DIAN_POLICY_HASH_BASE64,
     },
     signingTime: { value: adjustSigningTimeForLocalDate(options.signingTime ?? new Date()) },
-    signerRole: { claimed: ["supplier"] },
+    signerRole: { claimed: [options.signerRole ?? "supplier"] },
     signingCertificate: certificate.certificateDerBase64,
     productionPlace: {
       country: "Colombia",

@@ -59,3 +59,19 @@ export const CreateSupportDocumentBodySchema = z.object({
   document: DocumentBodySchema,
   send: SendOptionsSchema,
 });
+
+/**
+ * Body for POST /api/v1/documents/receipt-acknowledgments - RADIAN buyer-side
+ * events (acuse de recibo / recibo del bien / aceptación expresa / reclamo).
+ * PHASE 1 / SIMULATION ONLY - see receiptAcknowledgment.service.ts's own doc
+ * comment. No `send` field - there is no real DianProvider path for this
+ * document type yet.
+ */
+export const CreateReceiptAcknowledgmentBodySchema = z.object({
+  internalReference: z.string(),
+  eventType: z.enum(["ACUSE_RECIBO", "RECIBO_BIEN", "ACEPTACION_EXPRESA", "RECLAMO"]),
+  referencedCufe: z.string(),
+  referencedInvoiceId: z.string().optional(),
+  responseCode: z.string().optional(),
+  description: z.string().optional(),
+});

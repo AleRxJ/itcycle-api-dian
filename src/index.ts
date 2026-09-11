@@ -9,6 +9,7 @@ import { registerCreditNoteRoutes } from "./modules/documents/creditNote.route.j
 import { registerDebitNoteRoutes } from "./modules/documents/debitNote.route.js";
 import { registerInvoiceRoutes } from "./modules/documents/invoice.route.js";
 import { registerSupportDocumentRoutes } from "./modules/documents/supportDocument.route.js";
+import { registerReceiptAcknowledgmentRoutes } from "./modules/documents/receiptAcknowledgment.route.js";
 import { registerTestInvoiceRoute } from "./modules/invoices/test-invoice.route.js";
 import { requireAdminApiKey } from "./shared/adminAuth.js";
 import { requireApiKey } from "./shared/apiKeyAuth.js";
@@ -62,6 +63,7 @@ await app.register(async (documentRoutes) => {
   await registerCreditNoteRoutes(documentRoutes);
   await registerDebitNoteRoutes(documentRoutes);
   await registerSupportDocumentRoutes(documentRoutes);
+  await registerReceiptAcknowledgmentRoutes(documentRoutes);
 });
 
 // Tenant provisioning (create Company/DianConfiguration/NumberingResolution/
