@@ -24,6 +24,22 @@ export async function createCompany(params: CreateCompanyParams) {
   return prisma.company.create({ data: params });
 }
 
+/**
+ * Every company this instance has ever provisioned - there was no way to
+ * enumerate this before (createCompany is the only write, and it's
+ * idempotent-by-lookup rather than list-backed), which left a caller like
+ * Ohnix's own admin UI with nothing to cross-check its own bookkeeping
+ * against. Includes an apiKeys count so a caller can tell "provisioned, no
+ * key issued yet" apart from "has at least one key" without a second call
+ * per row.
+ */
+export async function listCompanies() {
+  return prisma.company.findMany({
+    orderBy: { createdAt: "desc" },
+    include: { _count: { select: { apiKeys: true } } },
+  });
+}
+
 export interface SetDianConfigurationParams {
   companyId: string;
   environment: "PRODUCTION" | "SANDBOX";
@@ -357,6 +373,75 @@ export async function createApiKeyForCompany(params: CreateApiKeyParams) {
   });
   // The only place the raw key is ever returned — callers must persist it immediately (see docs/dian/sandbox-tests.md).
   return { rawKey };
+}
+
+/**
+ * Every key ever issued for a company - metadata only (keyPrefix/label/
+ * status/lastUsedAt), never keyHash. The hash isn't the usable secret (the
+ * raw key is gone forever once createApiKeyForCompany returns it), but
+ * there's no reason for a list view to carry it either.
+ */
+export async function listApiKeysForCompany(companyId: string) {
+  return prisma.apiKey.findMany({
+    where: { companyId },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      keyPrefix: true,
+      label: true,
+      status: true,
+      lastUsedAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export interface CompanyDocumentUsage {
+  year: number;
+  month: number;
+  invoices: number;
+  creditNotes: number;
+  debitNotes: number;
+  supportDocuments: number;
+  total: number;
+}
+
+/**
+ * Read-only billable-usage count for a given calendar month (defaults to the
+ * current one) — the number of documents that actually reached DIAN
+ * acceptance (`status: "ACCEPTED"`), not merely attempted. This is what
+ * Ohnix's admin panel shows to manually invoice an external API client
+ * against its published per-document pricing; a document only counts once
+ * DIAN itself has accepted it.
+ */
+export async function getCompanyDocumentUsage(
+  companyId: string,
+  params?: { year?: number; month?: number },
+): Promise<CompanyDocumentUsage> {
+  const now = new Date();
+  const year = params?.year ?? now.getFullYear();
+  const month = params?.month ?? now.getMonth() + 1; // 1-12, matching the API's own convention
+
+  const startOfMonth = new Date(year, month - 1, 1);
+  const startOfNextMonth = new Date(year, month, 1);
+
+  const [invoices, creditNotes, debitNotes, supportDocuments] = await Promise.all([
+    prisma.invoice.count({ where: { companyId, status: "ACCEPTED", createdAt: { gte: startOfMonth, lt: startOfNextMonth } } }),
+    prisma.creditNote.count({ where: { companyId, status: "ACCEPTED", createdAt: { gte: startOfMonth, lt: startOfNextMonth } } }),
+    prisma.debitNote.count({ where: { companyId, status: "ACCEPTED", createdAt: { gte: startOfMonth, lt: startOfNextMonth } } }),
+    prisma.supportDocument.count({ where: { companyId, status: "ACCEPTED", createdAt: { gte: startOfMonth, lt: startOfNextMonth } } }),
+  ]);
+
+  return {
+    year,
+    month,
+    invoices,
+    creditNotes,
+    debitNotes,
+    supportDocuments,
+    total: invoices + creditNotes + debitNotes + supportDocuments,
+  };
 }
 
 export type RefreshableDocumentType = Extract<NumberedDocumentType, "01" | "91" | "92">;

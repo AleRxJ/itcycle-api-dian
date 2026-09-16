@@ -11,6 +11,7 @@ import { registerInvoiceRoutes } from "./modules/documents/invoice.route.js";
 import { registerSupportDocumentRoutes } from "./modules/documents/supportDocument.route.js";
 import { registerReceiptAcknowledgmentRoutes } from "./modules/documents/receiptAcknowledgment.route.js";
 import { registerTestInvoiceRoute } from "./modules/invoices/test-invoice.route.js";
+import { registerOpenApiRoutes } from "./modules/openapi/openapi.route.js";
 import { requireAdminApiKey } from "./shared/adminAuth.js";
 import { requireApiKey } from "./shared/apiKeyAuth.js";
 import { requireDevApiKey } from "./shared/devAuth.js";
@@ -25,6 +26,11 @@ const app = Fastify({
 });
 
 app.get("/health", async () => ({ status: "ok" }));
+
+// Public static OpenAPI document for the customer-facing document API — no
+// auth, matching how competitors publish their own API docs. See
+// src/openapi/spec.ts and src/modules/openapi/openapi.route.ts.
+await registerOpenApiRoutes(app);
 
 // A CertificateProviderTechnicalError's own `.message` is already a clean,
 // English, user-safe summary (see ViafirmaApiClient.ts's own comment on why

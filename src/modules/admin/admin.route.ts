@@ -19,9 +19,12 @@ import {
   createCompany,
   createNumberingResolution,
   getCertificateProviderStatus,
+  getCompanyDocumentUsage,
   getDianRawResponse,
   getDianReadiness,
   getFirmaPassStatus,
+  listApiKeysForCompany,
+  listCompanies,
   listTestSubmissions,
   refreshDocumentStatus,
   setCertificateProviderOverride,
@@ -60,6 +63,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const body = CreateCompanyBodySchema.parse(request.body);
     const company = await createCompany(body);
     return reply.code(201).send(company);
+  });
+
+  // Every company this instance has provisioned - see listCompanies' own
+  // doc comment for why this didn't exist until now.
+  app.get("/api/v1/admin/companies", async (_request, reply) => {
+    const companies = await listCompanies();
+    return reply.send(companies);
   });
 
   app.put<{ Params: { id: string } }>("/api/v1/admin/companies/:id/dian-configuration", async (request, reply) => {
@@ -102,6 +112,13 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const body = CreateApiKeyBodySchema.parse(request.body);
     const { rawKey } = await createApiKeyForCompany({ companyId: request.params.id, label: body.label });
     return reply.code(201).send({ rawKey });
+  });
+
+  // Metadata only (keyPrefix/label/status) - see listApiKeysForCompany's own
+  // doc comment for why keyHash never leaves this endpoint.
+  app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/api-keys", async (request, reply) => {
+    const keys = await listApiKeysForCompany(request.params.id);
+    return reply.send(keys);
   });
 
   // FirmaPass digital-certificate issuance (see modules/firmapass/firmaPassIssuance.service.ts).
@@ -262,6 +279,21 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
         reason: body.reason,
       });
       return reply.send(result);
+    },
+  );
+
+  // Read-only billable-usage count (ACCEPTED documents only) for a calendar
+  // month, defaulting to the current one - see admin.service.ts's
+  // getCompanyDocumentUsage. Consumed by Ohnix's admin panel to manually
+  // invoice an external API client against its published per-document pricing.
+  app.get<{ Params: { id: string }; Querystring: { year?: string; month?: string } }>(
+    "/api/v1/admin/companies/:id/usage",
+    async (request, reply) => {
+      const usage = await getCompanyDocumentUsage(request.params.id, {
+        year: request.query.year ? Number(request.query.year) : undefined,
+        month: request.query.month ? Number(request.query.month) : undefined,
+      });
+      return reply.send(usage);
     },
   );
 
