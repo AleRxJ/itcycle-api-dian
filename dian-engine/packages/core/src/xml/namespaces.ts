@@ -78,3 +78,23 @@ export const PROFILE_EXECUTION_ID = {
   PRODUCCION: "1",
   HABILITACION: "2",
 } as const;
+
+/**
+ * Namespace for Nómina Electrónica (DIAN Resolución 000013 de 2021) - a
+ * SEPARATE, non-UBL XML schema from Invoice/CreditNote/DebitNote above.
+ * Added alongside the invoicing constants, never replacing any of them -
+ * see xml/payroll-builder.ts's own module comment for the "verify before
+ * production use" caveat that applies to this whole namespace/schema pair.
+ */
+export const NS_PAYROLL_INDIVIDUAL = "dian:gov:co:facturaelectronica:NominaIndividual";
+export const NS_PAYROLL_ADJUSTMENT = "dian:gov:co:facturaelectronica:NominaIndividualDeAjuste";
+
+export const SCHEMA_LOCATION_PAYROLL_INDIVIDUAL = [
+  NS_PAYROLL_INDIVIDUAL,
+  "NominaIndividualElectronicaXSD.xsd",
+].join(" ");
+
+export const SCHEMA_LOCATION_PAYROLL_ADJUSTMENT = [
+  NS_PAYROLL_ADJUSTMENT,
+  "NominaIndividualDeAjusteElectronicoXSD.xsd",
+].join(" ");

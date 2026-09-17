@@ -6,9 +6,15 @@ import type { CertificateSecretStore } from "../../providers/certificates/Certif
 /**
  * DIAN document type codes this module claims numbering for. Kept as a
  * plain union (not the full DIAN code list in dian-engine's DocumentType
- * constant) because only these four are wired up on the ITCycle side.
+ * constant) because only these five are wired up on the ITCycle side.
+ *
+ * "NE" (Nómina Electrónica) is an ITCycle-internal discriminator, not a
+ * literal DIAN document-type code the way "01"/"91"/"92"/"05" are - payroll
+ * isn't part of that same invoicing code list at all, and has its own,
+ * separate DIAN numbering-resolution regime. It only needs to be a value
+ * this module and its NumberingResolution rows agree on.
  */
-export type NumberedDocumentType = "01" | "91" | "92" | "05";
+export type NumberedDocumentType = "01" | "91" | "92" | "05" | "NE";
 
 export interface LoadDianConfigParams {
   companyId: string;

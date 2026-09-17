@@ -7,6 +7,8 @@ export interface ProcessingReconcileSummary {
   creditNotes: number;
   debitNotes: number;
   supportDocuments: number;
+  payrollDocuments: number;
+  payrollAdjustments: number;
 }
 
 const ORPHANED_MESSAGE =
@@ -33,11 +35,13 @@ const ORPHANED_MESSAGE =
  */
 export async function reconcileOrphanedProcessingDocuments(logger?: FastifyBaseLogger): Promise<ProcessingReconcileSummary> {
   const data = { status: "ERROR" as const, errorMessage: ORPHANED_MESSAGE };
-  const [invoices, creditNotes, debitNotes, supportDocuments] = await Promise.all([
+  const [invoices, creditNotes, debitNotes, supportDocuments, payrollDocuments, payrollAdjustments] = await Promise.all([
     prisma.invoice.updateMany({ where: { status: "PROCESSING" }, data }),
     prisma.creditNote.updateMany({ where: { status: "PROCESSING" }, data }),
     prisma.debitNote.updateMany({ where: { status: "PROCESSING" }, data }),
     prisma.supportDocument.updateMany({ where: { status: "PROCESSING" }, data }),
+    prisma.payrollDocument.updateMany({ where: { status: "PROCESSING" }, data }),
+    prisma.payrollAdjustment.updateMany({ where: { status: "PROCESSING" }, data }),
   ]);
 
   const summary: ProcessingReconcileSummary = {
@@ -45,8 +49,16 @@ export async function reconcileOrphanedProcessingDocuments(logger?: FastifyBaseL
     creditNotes: creditNotes.count,
     debitNotes: debitNotes.count,
     supportDocuments: supportDocuments.count,
+    payrollDocuments: payrollDocuments.count,
+    payrollAdjustments: payrollAdjustments.count,
   };
-  const total = summary.invoices + summary.creditNotes + summary.debitNotes + summary.supportDocuments;
+  const total =
+    summary.invoices +
+    summary.creditNotes +
+    summary.debitNotes +
+    summary.supportDocuments +
+    summary.payrollDocuments +
+    summary.payrollAdjustments;
   if (total > 0) {
     logger?.warn({ summary }, `Reconciled ${total} document(s) orphaned in PROCESSING by a previous process`);
   }

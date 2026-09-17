@@ -23,6 +23,12 @@ export class DianKitProvider implements DianProvider {
   createSupportDocument: DianProvider["createSupportDocument"] = (input) =>
     this.kit.createSupportDocument(input);
 
+  createPayrollDocument: DianProvider["createPayrollDocument"] = (input) =>
+    this.kit.createPayrollDocument(input);
+
+  createPayrollAdjustment: DianProvider["createPayrollAdjustment"] = (input) =>
+    this.kit.createPayrollAdjustment(input);
+
   send: DianProvider["send"] = (document, options) => this.kit.send(document, options);
 
   getStatus: DianProvider["getStatus"] = (trackId) => this.kit.getStatus(trackId);

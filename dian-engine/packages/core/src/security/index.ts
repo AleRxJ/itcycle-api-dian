@@ -36,3 +36,12 @@ export {
   type SignXmlResult,
   signXml,
 } from "./signer.js";
+
+// Nómina Electrónica CUNE - added alongside CUFE/CUDE above, never
+// replacing them. See cune.ts's own "verify before production use" caveat.
+export {
+  buildCuneInput,
+  type CuneInput,
+  concatenateCuneFields,
+  generateCune,
+} from "./cune.js";

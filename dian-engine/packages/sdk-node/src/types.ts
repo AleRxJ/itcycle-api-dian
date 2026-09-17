@@ -12,6 +12,12 @@ import type {
   NumberingAuthorization,
   OperationTypeValue,
   Party,
+  PayrollAdjustmentTypeValue,
+  PayrollDeductions,
+  PayrollEarnings,
+  PayrollPaymentInfo,
+  PayrollPeriod as PayrollPeriodData,
+  PayrollWorker,
   PaymentMeans,
   SoftwareInfo,
   TaxTotal,
@@ -559,4 +565,47 @@ export interface LookupBuyerOptions {
    * @example `"900123456"` (NIT), `"1234567890"` (CC)
    */
   identificationNumber: string;
+}
+
+// ---------------------------------------------------------------------------
+// Nómina Electrónica (DIAN Resolución 000013 de 2021) - added alongside the
+// invoicing input types above, never replacing any of them. The employer
+// identity is NOT part of this input - `createPayrollDocument` derives it
+// from the SAME `DianKitConfig.supplier` invoicing already uses (one
+// DianKit instance = one company, regardless of which document type it
+// issues). See `@dian-kit/core`'s payroll types module comment for the
+// "verify before production use" caveat that applies to this whole family.
+// ---------------------------------------------------------------------------
+
+/**
+ * Input for creating a NominaIndividual (DIAN xmlType "102").
+ *
+ * @remarks
+ * - `id` must fall within the company's PAYROLL numbering resolution range
+ *   - a separate DIAN authorization from the invoicing one.
+ */
+export interface PayrollInput {
+  /** Document number including the payroll numbering prefix (e.g. "NIE990000001"). */
+  id: string;
+  issueDate: Date;
+  issueTime: Date;
+  worker: PayrollWorker;
+  period: PayrollPeriodData;
+  payment: PayrollPaymentInfo;
+  earnings: PayrollEarnings;
+  deductions: PayrollDeductions;
+  /** Total devengado - total deducciones. */
+  netPay: number;
+}
+
+/**
+ * Input for creating a NominaIndividualDeAjuste (DIAN xmlType "103") -
+ * replaces or voids a previously issued NominaIndividual in full (there is
+ * no partial-adjustment concept, unlike invoicing's credit notes).
+ */
+export interface PayrollAdjustmentInput extends PayrollInput {
+  /** "1" Reemplazar / "2" Eliminar - see PayrollAdjustmentType in `@dian-kit/core`. */
+  adjustmentType: PayrollAdjustmentTypeValue;
+  /** CUNE of the NominaIndividual being replaced/voided. */
+  predecessorCune: string;
 }

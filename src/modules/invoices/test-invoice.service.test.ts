@@ -25,6 +25,8 @@ function fakeProvider(overrides: Partial<DianProvider> = {}): DianProvider {
     createCreditNote: vi.fn(),
     createDebitNote: vi.fn(),
     createSupportDocument: vi.fn(),
+    createPayrollDocument: vi.fn(),
+    createPayrollAdjustment: vi.fn(),
     send: vi.fn(),
     getStatus: vi.fn(),
     getStatusZip: vi.fn(),

@@ -8,6 +8,7 @@ import { registerAdminRoutes } from "./modules/admin/admin.route.js";
 import { registerCreditNoteRoutes } from "./modules/documents/creditNote.route.js";
 import { registerDebitNoteRoutes } from "./modules/documents/debitNote.route.js";
 import { registerInvoiceRoutes } from "./modules/documents/invoice.route.js";
+import { registerPayrollRoutes } from "./modules/documents/nomina.route.js";
 import { registerSupportDocumentRoutes } from "./modules/documents/supportDocument.route.js";
 import { registerReceiptAcknowledgmentRoutes } from "./modules/documents/receiptAcknowledgment.route.js";
 import { registerTestInvoiceRoute } from "./modules/invoices/test-invoice.route.js";
@@ -70,6 +71,7 @@ await app.register(async (documentRoutes) => {
   await registerDebitNoteRoutes(documentRoutes);
   await registerSupportDocumentRoutes(documentRoutes);
   await registerReceiptAcknowledgmentRoutes(documentRoutes);
+  await registerPayrollRoutes(documentRoutes);
 });
 
 // Tenant provisioning (create Company/DianConfiguration/NumberingResolution/

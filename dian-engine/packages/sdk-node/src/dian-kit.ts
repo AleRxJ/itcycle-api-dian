@@ -2,6 +2,8 @@ import {
   buildCreditNoteXml,
   buildDebitNoteXml,
   buildInvoiceXml,
+  buildPayrollAdjustmentXml,
+  buildPayrollXml,
   buildSupportDocumentXml,
   type DianAcquirerResponse,
   type DianDocument,
@@ -11,6 +13,7 @@ import {
   type DianStatusResponse,
   DocumentType,
   generateCufe,
+  generateCune,
   generateSoftwareSecurityCode,
   getAcquirer,
   getNumberingRange,
@@ -18,6 +21,7 @@ import {
   getStatusZip,
   loadP12,
   OperationType,
+  type PayrollDocument as PayrollDianDocument,
   sendBill,
   signXml,
 } from "@dian-kit/core";
@@ -29,6 +33,8 @@ import type {
   DocumentResult,
   InvoiceInput,
   LookupBuyerOptions,
+  PayrollAdjustmentInput,
+  PayrollInput,
   ResolvedConfig,
   SendOptions,
   SupportDocumentInput,
@@ -373,6 +379,45 @@ export class DianKit {
   }
 
   /**
+   * Creates a signed Nómina Individual (Colombian electronic payroll
+   * document, DIAN xmlType "102" per Resolución 000013 de 2021) - added
+   * alongside createInvoice/createCreditNote/createDebitNote/
+   * createSupportDocument above, on a completely separate pipeline
+   * (own schema, own CUNE formula - see `@dian-kit/core`'s payroll module
+   * comments) that never touches theirs.
+   *
+   * The employer identity is derived from this SDK instance's own
+   * `config.supplier` (same company as every other document type this
+   * instance issues) - `input` only carries the per-document worker/period/
+   * pay data. `config.numbering`/`config.software` must point at the
+   * company's PAYROLL numbering resolution when constructing a `DianKit`
+   * instance used for nómina - a separate DIAN authorization from the
+   * invoicing one, even though the SDK config shape is reused as-is.
+   *
+   * ⚠️ See `@dian-kit/core`'s payroll types/CUNE/XML modules: this pipeline
+   * has not been validated against DIAN's official Anexo Técnico or a real
+   * habilitación run - verify before production use.
+   */
+  async createPayrollDocument(input: PayrollInput): Promise<DocumentResult> {
+    const doc = this.assemblePayrollDocument(input, { xmlType: "102" });
+    return this.processPayrollDocument(doc, buildPayrollXml);
+  }
+
+  /**
+   * Creates a signed Nómina Individual de Ajuste (DIAN xmlType "103") -
+   * replaces or voids a previously issued NominaIndividual in full. See
+   * {@link createPayrollDocument}'s own remarks (same caveats apply).
+   */
+  async createPayrollAdjustment(input: PayrollAdjustmentInput): Promise<DocumentResult> {
+    const doc = this.assemblePayrollDocument(input, {
+      xmlType: "103",
+      adjustmentType: input.adjustmentType,
+      predecessorCune: input.predecessorCune,
+    });
+    return this.processPayrollDocument(doc, buildPayrollAdjustmentXml);
+  }
+
+  /**
    * Sends a signed document to DIAN's SOAP web service.
    *
    * Packages the signed XML into a ZIP file (named `{nit}{documentNumber}.zip`)
@@ -676,6 +721,80 @@ export class DianKit {
       doc.software.pin,
       doc.id,
     );
+
+    const xml = buildXml(doc, uuid, softwareSecurityCode);
+
+    const { signedXml } = await signXml({
+      xml,
+      certificate: this.config.certificateData,
+      signingTime: doc.issueDate,
+    });
+
+    return {
+      xml,
+      signedXml,
+      uuid,
+      documentNumber: doc.id,
+    };
+  }
+
+  /**
+   * Assembles a complete `PayrollDocument` (nómina counterpart to
+   * {@link assembleDocument}) by merging per-document input with this
+   * instance's static config. Deliberately NOT validated against a Zod
+   * schema the way `assembleDocument` validates against
+   * `DianDocumentSchema` - no `@dian-kit/core` payroll schema exists yet
+   * (see that package's schemas module) - callers are responsible for
+   * passing well-formed `PayrollInput`/`PayrollAdjustmentInput` data until
+   * one is added.
+   *
+   * @internal
+   */
+  private assemblePayrollDocument(
+    input: PayrollInput,
+    overrides: { xmlType: "102" | "103"; adjustmentType?: string; predecessorCune?: string },
+  ): PayrollDianDocument {
+    return {
+      xmlType: overrides.xmlType,
+      adjustmentType: overrides.adjustmentType as PayrollDianDocument["adjustmentType"],
+      predecessorCune: overrides.predecessorCune,
+      environment: this.config.environment,
+      id: input.id,
+      issueDate: input.issueDate,
+      issueTime: input.issueTime,
+      employer: {
+        razonSocial: this.config.supplier.name,
+        identification: this.config.supplier.identification,
+        address: this.config.supplier.address,
+      },
+      worker: input.worker,
+      period: input.period,
+      payment: input.payment,
+      earnings: input.earnings,
+      deductions: input.deductions,
+      netPay: input.netPay,
+      software: this.config.software,
+      numbering: this.config.numbering,
+    };
+  }
+
+  /**
+   * Processes a validated `PayrollDocument` through its own pipeline: CUNE
+   * computation, SoftwareSecurityCode generation, payroll XML building, and
+   * XAdES-EPES signing (the last step, `signXml`, is the ONE piece
+   * genuinely shared with {@link processDocument} - it's document-type-
+   * agnostic already). Kept as its own method rather than generalizing
+   * `processDocument` to accept a hash function parameter, so nothing about
+   * the invoicing pipeline changes to make room for this.
+   *
+   * @internal
+   */
+  private async processPayrollDocument(
+    doc: PayrollDianDocument,
+    buildXml: (doc: PayrollDianDocument, cune: string, softwareSecurityCode: string) => string,
+  ): Promise<DocumentResult> {
+    const uuid = generateCune(doc);
+    const softwareSecurityCode = generateSoftwareSecurityCode(doc.software.id, doc.software.pin, doc.id);
 
     const xml = buildXml(doc, uuid, softwareSecurityCode);
 

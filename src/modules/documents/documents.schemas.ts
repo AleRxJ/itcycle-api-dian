@@ -75,3 +75,27 @@ export const CreateReceiptAcknowledgmentBodySchema = z.object({
   responseCode: z.string().optional(),
   description: z.string().optional(),
 });
+
+/**
+ * Nómina Electrónica bodies - added alongside the invoicing schemas above,
+ * never changing any of them. Same permissive `payroll: DocumentBodySchema`
+ * shape as `invoice`/`document` above - `@dian-kit/sdk-node`'s
+ * PayrollInput/PayrollAdjustmentInput fields aren't validated here (no Zod
+ * schema for them exists yet in `@dian-kit/core`, see dian-kit.ts's
+ * assemblePayrollDocument comment) - a malformed payload fails inside
+ * dian-kit's XML building instead of at this HTTP boundary.
+ */
+export const CreatePayrollBodySchema = z.object({
+  internalReference: z.string(),
+  payroll: DocumentBodySchema,
+  send: SendOptionsSchema,
+});
+
+/** Body for POST .../payroll/:id/adjustments — `adjustmentType` is DIAN's correction code ("1" Reemplazar, "2" Eliminar). */
+export const CreatePayrollAdjustmentBodySchema = z.object({
+  internalReference: z.string(),
+  payrollDocumentId: z.string(),
+  adjustmentType: z.enum(["1", "2"]),
+  payroll: DocumentBodySchema,
+  send: SendOptionsSchema,
+});

@@ -49,12 +49,12 @@ enum InvoiceStatus {
 /// Every other table is scoped to a companyId — no record may ever be
 /// readable or usable by a different company.
 model Company {
-  id         String       @id @default(cuid())
-  name       String
-  nit        String
-  dv         String
-  personType String // DIAN PersonType code: "1" Juridica, "2" Natural
-  status     RecordStatus @default(ACTIVE)
+  id                          String       @id @default(cuid())
+  name                        String
+  nit                         String
+  dv                          String
+  personType                  String // DIAN PersonType code: "1" Juridica, "2" Natural
+  status                      RecordStatus @default(ACTIVE)
   /// FirmaPass login key (Bearer token for identidad.firmapass.com), AES-256-GCM
   /// encrypted at rest via src/shared/secretEncryption.ts + FIRMAPASS_ENCRYPTION_KEY.
   /// One active login key per company, mirroring FirmaPass's own one-key-per-account
@@ -73,15 +73,17 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dianConfiguration    DianConfiguration?
-  numberingResolutions NumberingResolution[]
-  certificates         Certificate[]
-  invoices             Invoice[]
-  creditNotes          CreditNote[]
-  debitNotes           DebitNote[]
-  supportDocuments     SupportDocument[]
+  dianConfiguration      DianConfiguration?
+  numberingResolutions   NumberingResolution[]
+  certificates           Certificate[]
+  invoices               Invoice[]
+  creditNotes            CreditNote[]
+  debitNotes             DebitNote[]
+  supportDocuments       SupportDocument[]
   receiptAcknowledgments ReceiptAcknowledgment[]
-  apiKeys              ApiKey[]
+  apiKeys                ApiKey[]
+  payrollDocuments       PayrollDocument[]
+  payrollAdjustments     PayrollAdjustment[]
 
   @@unique([nit, dv])
 }
@@ -157,11 +159,13 @@ model NumberingResolution {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoices         Invoice[]
-  creditNotes      CreditNote[]
-  debitNotes       DebitNote[]
-  supportDocuments SupportDocument[]
+  company            Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices           Invoice[]
+  creditNotes        CreditNote[]
+  debitNotes         DebitNote[]
+  supportDocuments   SupportDocument[]
+  payrollDocuments   PayrollDocument[]
+  payrollAdjustments PayrollAdjustment[]
 
   @@unique([companyId, prefix])
   @@index([companyId])
@@ -172,49 +176,51 @@ model NumberingResolution {
 /// The private key/secret itself is NEVER stored here — `secretReference`
 /// only points into a CertificateSecretStore (Vault/KMS/etc).
 model Certificate {
-  id                     String       @id @default(cuid())
-  companyId              String
-  provider               String // e.g. "firmapass"
-  certificateIdentifier  String // provider-side reference, not the cert itself
-  secretReference        String // pointer into CertificateSecretStore
+  id                    String       @id @default(cuid())
+  companyId             String
+  provider              String // e.g. "firmapass"
+  certificateIdentifier String // provider-side reference, not the cert itself
+  secretReference       String // pointer into CertificateSecretStore
   /// Null while a FirmaPass certificate is still being issued (status
   /// INACTIVE, real value not known until the provider confirms — see
   /// src/jobs/firmaPassIssuance.job.ts). Always set for non-FirmaPass
   /// providers, and set for FirmaPass once issuance finishes.
-  expiresAt              DateTime?
-  status                 RecordStatus @default(ACTIVE)
+  expiresAt             DateTime?
+  status                RecordStatus @default(ACTIVE)
   /// Provider-specific, non-secret bits that don't fit the columns above —
   /// e.g. Viafirma's `publicId` (needed for the P7B download step,
   /// distinct from `certificateIdentifier`/`codRequest` used everywhere
   /// else) and, while a request is still pending, its raw provider status
   /// code for support/debugging. NEVER put secret material here (see
   /// `secretReference` instead) — this column is not encrypted at rest.
-  providerMetadata       Json?
+  providerMetadata      Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company          Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  invoices         Invoice[]
-  creditNotes      CreditNote[]
-  debitNotes       DebitNote[]
-  supportDocuments SupportDocument[]
+  company                Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoices               Invoice[]
+  creditNotes            CreditNote[]
+  debitNotes             DebitNote[]
+  supportDocuments       SupportDocument[]
   receiptAcknowledgments ReceiptAcknowledgment[]
+  payrollDocuments       PayrollDocument[]
+  payrollAdjustments     PayrollAdjustment[]
 
   @@index([companyId])
 }
 
 /// An electronic invoice (Factura de Venta) issued by a company.
 model Invoice {
-  id                  String        @id @default(cuid())
-  companyId           String
-  numberingId         String?
-  certificateId        String?
-  internalReference   String // idempotency key (e.g. Idempotency-Key header)
-  invoiceNumber        String? // full number, e.g. "SETP990000001"
-  prefix               String?
-  cufe                 String?
-  status               InvoiceStatus @default(PENDING)
+  id                    String        @id @default(cuid())
+  companyId             String
+  numberingId           String?
+  certificateId         String?
+  internalReference     String // idempotency key (e.g. Idempotency-Key header)
+  invoiceNumber         String? // full number, e.g. "SETP990000001"
+  prefix                String?
+  cufe                  String?
+  status                InvoiceStatus @default(PENDING)
   /// ZipKey/UUID DIAN returns for an async send (SendBillAsync/
   /// SendTestSetAsync) - null for sync sends, which never need a later
   /// getStatusZip lookup. See computeSentStatusFields in
@@ -397,26 +403,26 @@ model DianResponseBlob {
 /// Unlike CreditNote/DebitNote, this is standalone: it does not reference or
 /// correct a prior Invoice.
 model SupportDocument {
-  id                     String        @id @default(cuid())
-  companyId              String
-  numberingId            String?
-  certificateId          String?
-  internalReference      String // idempotency key
-  documentNumber         String? // full number, e.g. "DSNO0000001"
-  prefix                 String?
-  cufe                   String? // CUDE, despite the field name (matches Invoice/CreditNote/DebitNote's own convention)
-  status                 InvoiceStatus @default(PENDING)
-  simulated              Boolean       @default(false)
-  xmlReference           String?
-  dianResponseReference  String?
-  issuedAt               DateTime?
-  sentAt                 DateTime?
-  acceptedAt             DateTime?
-  rejectedAt             DateTime?
-  errorCode              String?
-  errorMessage           String?
+  id                    String        @id @default(cuid())
+  companyId             String
+  numberingId           String?
+  certificateId         String?
+  internalReference     String // idempotency key
+  documentNumber        String? // full number, e.g. "DSNO0000001"
+  prefix                String?
+  cufe                  String? // CUDE, despite the field name (matches Invoice/CreditNote/DebitNote's own convention)
+  status                InvoiceStatus @default(PENDING)
+  simulated             Boolean       @default(false)
+  xmlReference          String?
+  dianResponseReference String?
+  issuedAt              DateTime?
+  sentAt                DateTime?
+  acceptedAt            DateTime?
+  rejectedAt            DateTime?
+  errorCode             String?
+  errorMessage          String?
   /// See Invoice.testSetId — same meaning.
-  testSetId              String?
+  testSetId             String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -474,4 +480,94 @@ enum ReceiptAcknowledgmentEventType {
   RECIBO_BIEN
   ACEPTACION_EXPRESA
   RECLAMO
+}
+
+// ---------------------------------------------------------------------------
+// Nómina Electrónica (DIAN Resolución 000013 de 2021) - added alongside the
+// invoicing models above, never modifying any of them. Same shape/status
+// machine as Invoice/CreditNote (reuses InvoiceStatus - the state machine is
+// identical: PENDING -> PROCESSING -> SENT/ACCEPTED/REJECTED/CONTINGENCY/
+// ERROR), "cune" in place of "cufe". See `@dian-kit/core`'s payroll modules
+// for the "verify before production use" caveat that applies to the whole
+// pipeline this persists the output of.
+// ---------------------------------------------------------------------------
+
+/// A NominaIndividual (electronic payroll document, DIAN xmlType "102") for
+/// one employee/period, issued by a company.
+model PayrollDocument {
+  id                    String        @id @default(cuid())
+  companyId             String
+  numberingId           String?
+  certificateId         String?
+  internalReference     String // idempotency key
+  documentNumber        String? // full number, e.g. "NIE990000001"
+  prefix                String?
+  cune                  String?
+  status                InvoiceStatus @default(PENDING)
+  trackId               String?
+  statusDescription     String?
+  simulated             Boolean       @default(false)
+  xmlReference          String?
+  dianResponseReference String?
+  issuedAt              DateTime?
+  sentAt                DateTime?
+  acceptedAt            DateTime?
+  rejectedAt            DateTime?
+  errorCode             String?
+  errorMessage          String?
+  testSetId             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  numbering   NumberingResolution? @relation(fields: [numberingId], references: [id])
+  certificate Certificate?         @relation(fields: [certificateId], references: [id])
+  adjustments PayrollAdjustment[]
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
+}
+
+/// A NominaIndividualDeAjuste (DIAN xmlType "103") that replaces or voids a
+/// previously issued, ACCEPTED PayrollDocument in full - same
+/// "always references the parent document, service derives the
+/// predecessorCune itself" pattern as CreditNote/DebitNote reference their
+/// Invoice.
+model PayrollAdjustment {
+  id                    String        @id @default(cuid())
+  companyId             String
+  payrollDocumentId     String
+  numberingId           String?
+  certificateId         String?
+  internalReference     String // idempotency key
+  documentNumber        String?
+  prefix                String?
+  cune                  String?
+  adjustmentType        String // DIAN correction code: "1" Reemplazar, "2" Eliminar
+  status                InvoiceStatus @default(PENDING)
+  trackId               String?
+  statusDescription     String?
+  simulated             Boolean       @default(false)
+  xmlReference          String?
+  dianResponseReference String?
+  issuedAt              DateTime?
+  sentAt                DateTime?
+  acceptedAt            DateTime?
+  rejectedAt            DateTime?
+  errorCode             String?
+  errorMessage          String?
+  testSetId             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company         Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payrollDocument PayrollDocument      @relation(fields: [payrollDocumentId], references: [id])
+  numbering       NumberingResolution? @relation(fields: [numberingId], references: [id])
+  certificate     Certificate?         @relation(fields: [certificateId], references: [id])
+
+  @@unique([companyId, internalReference])
+  @@index([companyId, status])
+  @@index([payrollDocumentId])
 }

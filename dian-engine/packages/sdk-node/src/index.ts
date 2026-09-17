@@ -55,6 +55,10 @@ export type {
   SendOptions,
   /** Input for creating a Documento Soporte (type 05). */
   SupportDocumentInput,
+  /** Input for creating a Nómina Individual de Ajuste (payroll correction, DIAN xmlType "103"). */
+  PayrollAdjustmentInput,
+  /** Input for creating a Nómina Individual (electronic payroll document, DIAN xmlType "102"). */
+  PayrollInput,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -115,6 +119,35 @@ export type {
   TaxSubtotal,
   /** Aggregated tax total for a document or line. */
   TaxTotal,
+  /** One devengado/deducción/aporte line in a payroll document. */
+  PayrollAmountLine,
+  /** Devengados block of a payroll document. */
+  PayrollEarnings,
+  /** Deducciones block of a payroll document. */
+  PayrollDeductions,
+  /** Payment info (forma/método de pago) for a payroll document. */
+  PayrollPaymentInfo,
+  /** Settlement period info for a payroll document. */
+  PayrollPeriod,
+  /** Worker (trabajador) info for a payroll document. */
+  PayrollWorker,
+} from "@dian-kit/core";
+
+// ---------------------------------------------------------------------------
+// Nómina Electrónica constants - re-exported alongside the invoicing
+// constants above, never replacing any of them.
+// ---------------------------------------------------------------------------
+export {
+  /** DIAN payroll correction codes: "1" Reemplazar, "2" Eliminar. */
+  PayrollAdjustmentType,
+  /** DIAN "TipoContrato" codes for payroll workers. */
+  PayrollContractType,
+  /** DIAN payroll periodicity codes (semanal/decadal/catorcenal/quincenal/mensual). */
+  PayrollPeriodicity as PayrollPeriodicityCode,
+  /** DIAN "SubTipoTrabajador" codes. */
+  PayrollWorkerSubType,
+  /** DIAN "TipoTrabajador" codes. */
+  PayrollWorkerType,
 } from "@dian-kit/core";
 
 // ---------------------------------------------------------------------------

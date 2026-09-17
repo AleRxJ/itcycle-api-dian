@@ -8,6 +8,8 @@ import type {
   DocumentResult,
   InvoiceInput,
   LookupBuyerOptions,
+  PayrollAdjustmentInput,
+  PayrollInput,
   SendOptions,
   SupportDocumentInput,
 } from "@dian-kit/sdk-node";
@@ -25,6 +27,15 @@ export interface DianProvider {
   createCreditNote(input: CreditNoteInput): Promise<DocumentResult>;
   createDebitNote(input: DebitNoteInput): Promise<DocumentResult>;
   createSupportDocument(input: SupportDocumentInput): Promise<DocumentResult>;
+  /**
+   * Nómina Electrónica (DIAN Resolución 000013 de 2021) - added alongside
+   * the invoicing methods above, on dian-kit's own separate payroll
+   * pipeline (own CUNE, own XML schema). See `@dian-kit/sdk-node`'s
+   * payroll types for the "verify before production use" caveat.
+   */
+  createPayrollDocument(input: PayrollInput): Promise<DocumentResult>;
+  /** Payroll correction (replace/void) - see {@link createPayrollDocument}'s remarks. */
+  createPayrollAdjustment(input: PayrollAdjustmentInput): Promise<DocumentResult>;
   send(document: DocumentResult, options?: SendOptions): Promise<DianSendResponse>;
   getStatus(trackId: string): Promise<DianStatusResponse>;
   getStatusZip(trackId: string): Promise<DianStatusResponse>;

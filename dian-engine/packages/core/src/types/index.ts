@@ -5,3 +5,4 @@
  * including parties, tax information, line items, and monetary totals.
  */
 export * from "./common.js";
+export * from "./payroll.js";

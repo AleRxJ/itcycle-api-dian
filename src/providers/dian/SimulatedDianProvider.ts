@@ -48,6 +48,12 @@ export class SimulatedDianProvider implements DianProvider {
   createSupportDocument: DianProvider["createSupportDocument"] = (input) =>
     this.real.createSupportDocument(input);
 
+  createPayrollDocument: DianProvider["createPayrollDocument"] = (input) =>
+    this.real.createPayrollDocument(input);
+
+  createPayrollAdjustment: DianProvider["createPayrollAdjustment"] = (input) =>
+    this.real.createPayrollAdjustment(input);
+
   async send(document: DocumentResult): Promise<DianSendResponse> {
     return {
       isValid: true,
