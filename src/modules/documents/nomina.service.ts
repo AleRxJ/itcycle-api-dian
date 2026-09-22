@@ -373,3 +373,61 @@ export async function createPayrollAdjustment(params: CreatePayrollAdjustmentPar
 export async function getPayrollAdjustment(companyId: string, id: string) {
   return prisma.payrollAdjustment.findFirst({ where: { id, companyId }, include: { certificate: true } });
 }
+
+/** Retries sending a CONTINGENCY payroll adjustment - see retryPayrollDocumentSend above for the full rationale (identical here, different Prisma model). */
+export async function retryPayrollAdjustmentSend(
+  companyId: string,
+  id: string,
+  send?: SendOptions,
+  deps: DocumentServiceDeps = {},
+) {
+  const secretStore = deps.secretStore ?? createDefaultCertificateSecretStore();
+  const createProvider = deps.createProvider ?? defaultCreateProvider;
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const simulated = !deps.createProvider && env.dianSimulationMode;
+
+  const adjustment = await prisma.payrollAdjustment.findFirst({ where: { id, companyId } });
+  if (!adjustment) {
+    throw new Error(`Payroll adjustment ${id} not found for company ${companyId}`);
+  }
+  const stuckWithoutTrackId = adjustment.status === "SENT" && !adjustment.trackId;
+  if (adjustment.status !== "CONTINGENCY" && !stuckWithoutTrackId) {
+    throw new Error(`Payroll adjustment ${id} is not in CONTINGENCY (status=${adjustment.status}) — nothing to retry.`);
+  }
+  if (!adjustment.xmlReference || !adjustment.documentNumber || !adjustment.cune) {
+    throw new Error(`Payroll adjustment ${id} is CONTINGENCY but missing xmlReference/documentNumber/cune — cannot resend.`);
+  }
+
+  const { config } = await loadDianConfig({ companyId, documentType: "NE" }, secretStore);
+  const provider = createProvider(config);
+  const signedXml = await xmlStore.get(adjustment.xmlReference);
+  const document = reconstructDocumentForResend(signedXml, adjustment.documentNumber, adjustment.cune);
+
+  const outcome = await sendWithContingencyHandling(provider, document, send);
+
+  if (outcome.kind === "contingency") {
+    return await prisma.payrollAdjustment.update({
+      where: { id: adjustment.id },
+      data: {
+        errorMessage: outcome.error.rawResponse
+          ? `${outcome.error.message}\n\nDIAN response: ${outcome.error.rawResponse}`
+          : outcome.error.message,
+      },
+      include: { certificate: true },
+    });
+  }
+
+  const { response } = outcome;
+  await rawResponseStore.save(adjustment.xmlReference, response.rawResponse);
+  return await prisma.payrollAdjustment.update({
+    where: { id: adjustment.id },
+    data: {
+      simulated,
+      sentAt: new Date(),
+      dianResponseReference: adjustment.xmlReference,
+      ...computeSentStatusFields(response),
+    },
+    include: { certificate: true },
+  });
+}

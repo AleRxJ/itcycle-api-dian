@@ -5,7 +5,7 @@ import { retryCreditNoteSend } from "../modules/documents/creditNote.service.js"
 import { retryDebitNoteSend } from "../modules/documents/debitNote.service.js";
 import type { DocumentServiceDeps } from "../modules/documents/invoice.service.js";
 import { retryInvoiceSend } from "../modules/documents/invoice.service.js";
-import { retryPayrollDocumentSend } from "../modules/documents/nomina.service.js";
+import { retryPayrollAdjustmentSend, retryPayrollDocumentSend } from "../modules/documents/nomina.service.js";
 import { retrySupportDocumentSend } from "../modules/documents/supportDocument.service.js";
 import { prisma } from "../infrastructure/prisma.js";
 import { env } from "../shared/env.js";
@@ -41,15 +41,13 @@ export async function retryAllContingencyDocuments(
   const summary: ContingencyRetrySummary = { attempted: 0, accepted: 0, stillContingency: 0, failed: 0 };
 
   const retryableWhere = { OR: [{ status: "CONTINGENCY" as const }, { status: "SENT" as const, trackId: null }] };
-  const [invoices, creditNotes, debitNotes, supportDocuments, payrollDocuments] = await Promise.all([
+  const [invoices, creditNotes, debitNotes, supportDocuments, payrollDocuments, payrollAdjustments] = await Promise.all([
     prisma.invoice.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
     prisma.creditNote.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
     prisma.debitNote.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
     prisma.supportDocument.findMany({ where: { status: "CONTINGENCY" }, select: { id: true, companyId: true } }),
-    // payrollAdjustment isn't swept here yet - no retryPayrollAdjustmentSend
-    // exists (see nomina.service.ts); adjustments are rare enough corrections
-    // that this is a deliberate, small gap rather than an oversight.
     prisma.payrollDocument.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
+    prisma.payrollAdjustment.findMany({ where: retryableWhere, select: { id: true, companyId: true } }),
   ]);
 
   for (const invoice of invoices) {
@@ -104,6 +102,17 @@ export async function retryAllContingencyDocuments(
     } catch (error) {
       summary.failed += 1;
       logger?.warn({ error, payrollDocumentId: payrollDocument.id }, "contingency retry failed for payroll document");
+    }
+  }
+
+  for (const payrollAdjustment of payrollAdjustments) {
+    summary.attempted += 1;
+    try {
+      const result = await retryPayrollAdjustmentSend(payrollAdjustment.companyId, payrollAdjustment.id, undefined, deps);
+      tally(summary, result.status);
+    } catch (error) {
+      summary.failed += 1;
+      logger?.warn({ error, payrollAdjustmentId: payrollAdjustment.id }, "contingency retry failed for payroll adjustment");
     }
   }
 

@@ -6,6 +6,7 @@ import {
   createPayrollDocument,
   getPayrollAdjustment,
   getPayrollDocument,
+  retryPayrollAdjustmentSend,
   retryPayrollDocumentSend,
 } from "./nomina.service.js";
 
@@ -75,5 +76,20 @@ export async function registerPayrollRoutes(app: FastifyInstance): Promise<void>
       return reply.code(404).send({ error: "not_found" });
     }
     return reply.send(adjustment);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/documents/payroll-adjustments/:id/retry-send", async (request, reply) => {
+    const body = RetrySendBodySchema.parse(request.body ?? {});
+
+    try {
+      const adjustment = await retryPayrollAdjustmentSend(request.company!.id, request.params.id, body.send);
+      return await reply.send(adjustment);
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(502).send({
+        error: "dian_send_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 }
