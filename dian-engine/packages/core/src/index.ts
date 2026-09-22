@@ -18,7 +18,14 @@ export * from "./security/index.js";
 export * from "./transport/index.js";
 // Types
 export type * from "./types/index.js";
-export { CONSUMIDOR_FINAL } from "./types/index.js";
+export {
+  CONSUMIDOR_FINAL,
+  PayrollWorkerType,
+  PayrollWorkerSubType,
+  PayrollContractType,
+  PayrollPeriodicity,
+  PayrollAdjustmentType,
+} from "./types/index.js";
 
 // Utilities
 export * from "./utils/index.js";
