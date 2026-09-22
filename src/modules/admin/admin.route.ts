@@ -321,7 +321,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   // documentSend.service.ts's computeSentStatusFields and
   // admin.service.ts's refreshDocumentStatus. Safe to call repeatedly:
   // already-terminal documents are returned unchanged without a DIAN call.
-  const REFRESHABLE_TYPES: RefreshableDocumentType[] = ["01", "91", "92"];
+  const REFRESHABLE_TYPES: RefreshableDocumentType[] = ["01", "91", "92", "NE", "NE_ADJUSTMENT"];
   app.post<{ Params: { id: string; documentType: string; docId: string } }>(
     "/api/v1/admin/companies/:id/documents/:documentType/:docId/refresh-status",
     async (request, reply) => {

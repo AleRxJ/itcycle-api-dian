@@ -444,7 +444,18 @@ export async function getCompanyDocumentUsage(
   };
 }
 
-export type RefreshableDocumentType = Extract<NumberedDocumentType, "01" | "91" | "92">;
+// "NE" (payroll) added alongside "01"/"91"/"92" - nómina reuses the same
+// SendBillSync/SendBillAsync/SendTestSetAsync transport as invoicing (see
+// constants/dian-endpoints.ts), so it can land in the same async "SENT"
+// intermediate status this function resolves. "05" (support document) stays
+// excluded - it never takes the async path (see contingencyRetry.job.ts).
+// "NE_ADJUSTMENT" is NOT a NumberedDocumentType (adjustments share "NE"'s own
+// numbering pool, they don't have a separate one) - it exists purely as a
+// second discriminator so this same refresh mechanism can target the
+// PayrollAdjustment table instead of PayrollDocument, confirmed necessary by
+// scripts/smoke-test-payroll.ts: an adjustment can land in "SENT" exactly
+// like its parent document.
+export type RefreshableDocumentType = Extract<NumberedDocumentType, "01" | "91" | "92" | "NE"> | "NE_ADJUSTMENT";
 
 export interface RefreshDocumentStatusParams {
   companyId: string;
@@ -483,8 +494,12 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
     return record;
   }
 
+  // "NE_ADJUSTMENT" is this function's own discriminator (see
+  // RefreshableDocumentType) - adjustments don't have a separate numbering
+  // resolution, they draw from "NE"'s, so that's what loadDianConfig needs.
+  const numberingDocumentType = params.documentType === "NE_ADJUSTMENT" ? "NE" : params.documentType;
   const secretStore = createDefaultCertificateSecretStore();
-  const { config } = await loadDianConfig({ companyId: params.companyId, documentType: params.documentType }, secretStore);
+  const { config } = await loadDianConfig({ companyId: params.companyId, documentType: numberingDocumentType }, secretStore);
   const provider = env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
 
   const status = await provider.getStatusZip(record.trackId);
@@ -524,6 +539,10 @@ function findDocumentRecord(documentType: RefreshableDocumentType, companyId: st
       return prisma.creditNote.findFirst({ where: { id, companyId } });
     case "92":
       return prisma.debitNote.findFirst({ where: { id, companyId } });
+    case "NE":
+      return prisma.payrollDocument.findFirst({ where: { id, companyId } });
+    case "NE_ADJUSTMENT":
+      return prisma.payrollAdjustment.findFirst({ where: { id, companyId } });
   }
 }
 
@@ -537,6 +556,8 @@ function findAnyDocumentRecord(documentType: NumberedDocumentType, companyId: st
       return prisma.debitNote.findFirst({ where: { id, companyId } });
     case "05":
       return prisma.supportDocument.findFirst({ where: { id, companyId } });
+    case "NE":
+      return prisma.payrollDocument.findFirst({ where: { id, companyId } });
   }
 }
 
@@ -582,6 +603,10 @@ function updateDocumentRecord(documentType: RefreshableDocumentType, id: string,
       return prisma.creditNote.update({ where: { id }, data });
     case "92":
       return prisma.debitNote.update({ where: { id }, data });
+    case "NE":
+      return prisma.payrollDocument.update({ where: { id }, data });
+    case "NE_ADJUSTMENT":
+      return prisma.payrollAdjustment.update({ where: { id }, data });
   }
 }
 

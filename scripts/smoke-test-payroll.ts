@@ -13,6 +13,7 @@
  *
  *   npx tsx scripts/smoke-test-payroll.ts
  */
+import { refreshDocumentStatus } from "../src/modules/admin/admin.service.js";
 import { prisma } from "../src/infrastructure/prisma.js";
 import { createPayrollAdjustment, createPayrollDocument, getPayrollDocument } from "../src/modules/documents/nomina.service.js";
 
@@ -111,7 +112,14 @@ async function main() {
     errorMessage: document.errorMessage,
   });
 
-  if (document.status !== "ACCEPTED") {
+  let finalDocument = document;
+  if (document.status === "SENT") {
+    console.log("\nDocument landed in intermediate SENT (async send, has trackId) — polling refresh-status (admin.service.ts#refreshDocumentStatus, documentType=NE)...");
+    finalDocument = await refreshDocumentStatus({ companyId: company.id, documentType: "NE", id: document.id });
+    console.log("Refreshed result:", { status: finalDocument.status, errorMessage: finalDocument.errorMessage });
+  }
+
+  if (finalDocument.status !== "ACCEPTED") {
     console.log("\nDocument did not reach ACCEPTED — stopping before the adjustment test.");
     return;
   }
@@ -134,6 +142,12 @@ async function main() {
     cune: adjustment.cune,
     errorMessage: adjustment.errorMessage,
   });
+
+  if (adjustment.status === "SENT") {
+    console.log("\nAdjustment landed in intermediate SENT too — polling refresh-status (documentType=NE_ADJUSTMENT)...");
+    const refreshedAdjustment = await refreshDocumentStatus({ companyId: company.id, documentType: "NE_ADJUSTMENT", id: adjustment.id });
+    console.log("Refreshed adjustment result:", { status: refreshedAdjustment.status, errorMessage: refreshedAdjustment.errorMessage });
+  }
 }
 
 main()
