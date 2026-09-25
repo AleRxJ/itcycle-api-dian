@@ -206,7 +206,25 @@ model Certificate {
   receiptAcknowledgments ReceiptAcknowledgment[]
   payrollDocuments       PayrollDocument[]
   payrollAdjustments     PayrollAdjustment[]
+  exportEvents           CertificateExportEvent[]
 
+  @@index([companyId])
+}
+
+/// Audit trail for exportCertificate (admin.service.ts) - the real .p12 +
+/// password is handed back through the API on this event, so unlike every
+/// other Certificate-adjacent action, this one gets its own log: no secret
+/// material here, just "this certificate's key material left the store on
+/// this date." Never deleted, even if the certificate itself later is.
+model CertificateExportEvent {
+  id            String   @id @default(cuid())
+  certificateId String
+  companyId     String
+  exportedAt    DateTime @default(now())
+
+  certificate Certificate @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([certificateId])
   @@index([companyId])
 }
 
