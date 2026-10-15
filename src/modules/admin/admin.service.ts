@@ -4,7 +4,9 @@ import { prisma } from "../../infrastructure/prisma.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
 import { generateApiKey } from "../../shared/apiKeyAuth.js";
 import { env } from "../../shared/env.js";
-import { loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
+import type { DianKitConfig } from "@dian-kit/sdk-node";
+
+import { findSigningCertificate, loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
 import { isStillValidatingMessage, isTestSetAlreadyAcceptedMessage } from "../documents/documentSend.service.js";
 import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
 import { DianKitProvider } from "../../providers/dian/DianKitProvider.js";
@@ -654,4 +656,50 @@ export async function listTestSubmissions(companyId: string, testSetId?: string)
   ];
 
   return submissions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+export interface LookupAcquirerParams {
+  companyId: string;
+  identificationType: string;
+  identificationNumber: string;
+}
+
+/**
+ * DIAN's GetAcquirer for one NIT/cédula: the registered name and e-invoice
+ * reception email. Consumed by Ohnix's "buscar tercero" (customer/supplier
+ * form autocomplete). Only needs this company's certificate + environment -
+ * unlike loadDianConfig, no numbering resolution - so any company with an
+ * ACTIVE certificate can answer it, habilitada or not.
+ *
+ * Always the real DianKitProvider, even in dianSimulationMode: it's a
+ * read-only query (nothing is issued), and SimulatedDianProvider
+ * deliberately refuses it rather than invent registry data.
+ */
+export async function lookupAcquirer(params: LookupAcquirerParams) {
+  const company = await prisma.company.findUniqueOrThrow({
+    where: { id: params.companyId },
+    include: { dianConfiguration: true },
+  });
+  if (!company.dianConfiguration) {
+    throw new Error(`Company ${params.companyId} has no DianConfiguration`);
+  }
+  const certificate = await findSigningCertificate(company);
+  const secret = await createDefaultCertificateSecretStore().get(certificate.secretReference);
+  // DianKit's constructor only loads the .p12; supplier/software/numbering
+  // are never touched by lookupBuyer, so they're left out on purpose.
+  const config = {
+    certificate: secret.p12,
+    certificatePassword: secret.password,
+    environment: company.dianConfiguration.environment === "PRODUCTION" ? "1" : "2",
+  } as unknown as DianKitConfig;
+  const result = await new DianKitProvider(config).lookupBuyer({
+    identificationType: params.identificationType,
+    identificationNumber: params.identificationNumber,
+  });
+  return {
+    receiverName: result.receiverName,
+    receiverEmail: result.receiverEmail,
+    statusCode: result.statusCode,
+    message: result.message,
+  };
 }

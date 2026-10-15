@@ -30,6 +30,39 @@ export interface LoadedDianConfig {
 }
 
 /**
+ * The certificate that signs this company's DIAN calls: the most recently
+ * created ACTIVE, non-expired one. Shared by loadDianConfig and
+ * admin.service.ts's lookupAcquirer (which needs a certificate but no
+ * numbering resolution), so both always agree on which cert is "the" one.
+ */
+export async function findSigningCertificate(
+  company: { id: string; certificateProviderOverride: string | null },
+  now: Date = new Date(),
+) {
+  const candidateCertificates = await prisma.certificate.findMany({
+    where: { companyId: company.id, status: "ACTIVE" },
+    orderBy: { createdAt: "desc" },
+  });
+  // certificateProviderOverride is null for every company by default -
+  // preserves the original "most recently created ACTIVE cert, regardless
+  // of provider" behavior exactly. Only companies that explicitly chose a
+  // provider (because they have more than one ACTIVE at once - mid-migration
+  // or a manual contingency fallback) get filtered to just that provider.
+  const eligibleCertificates = company.certificateProviderOverride
+    ? candidateCertificates.filter((c) => c.provider === company.certificateProviderOverride)
+    : candidateCertificates;
+  const certificate = eligibleCertificates.find((c) => !c.expiresAt || c.expiresAt >= now);
+  if (!certificate) {
+    throw new Error(
+      company.certificateProviderOverride
+        ? `Company ${company.id} has no ACTIVE, non-expired Certificate from provider "${company.certificateProviderOverride}" (its chosen certificateProviderOverride).`
+        : `Company ${company.id} has no ACTIVE, non-expired Certificate.`,
+    );
+  }
+  return certificate;
+}
+
+/**
  * Loads everything a DianProvider call needs for one company/document type:
  * DianConfiguration, an ACTIVE NumberingResolution scoped to that
  * documentType, an ACTIVE Certificate, and the certificate's actual secret
@@ -79,27 +112,7 @@ export async function loadDianConfig(
     );
   }
 
-  const candidateCertificates = await prisma.certificate.findMany({
-    where: { companyId: params.companyId, status: "ACTIVE" },
-    orderBy: { createdAt: "desc" },
-  });
-  // certificateProviderOverride is null for every company by default -
-  // preserves the original "most recently created ACTIVE cert, regardless
-  // of provider" behavior exactly. Only companies that explicitly chose a
-  // provider (because they have more than one ACTIVE at once - mid-migration
-  // or a manual contingency fallback) get filtered to just that provider.
-  const eligibleCertificates = company.certificateProviderOverride
-    ? candidateCertificates.filter((c) => c.provider === company.certificateProviderOverride)
-    : candidateCertificates;
-  const certificate = eligibleCertificates.find((c) => !c.expiresAt || c.expiresAt >= now);
-  if (!certificate) {
-    throw new Error(
-      company.certificateProviderOverride
-        ? `Company ${params.companyId} has no ACTIVE, non-expired Certificate from provider "${company.certificateProviderOverride}" (its chosen certificateProviderOverride).`
-        : `Company ${params.companyId} has no ACTIVE, non-expired Certificate.`,
-    );
-  }
-
+  const certificate = await findSigningCertificate(company, now);
   const secret = await secretStore.get(certificate.secretReference);
 
   const config: DianKitConfig = {
