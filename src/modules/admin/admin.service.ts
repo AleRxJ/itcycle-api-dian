@@ -704,6 +704,12 @@ export interface LookupAcquirerParams {
   companyId: string;
   identificationType: string;
   identificationNumber: string;
+  /**
+   * Which DIAN registry to ask. Defaults to the company's own environment,
+   * but Ohnix asks PRODUCTION: habilitación only knows test data, so a real
+   * person is "not found" there.
+   */
+  environment?: "PRODUCTION" | "SANDBOX";
 }
 
 /**
@@ -732,12 +738,23 @@ export async function lookupAcquirer(params: LookupAcquirerParams) {
   const config = {
     certificate: secret.p12,
     certificatePassword: secret.password,
-    environment: company.dianConfiguration.environment === "PRODUCTION" ? "1" : "2",
+    environment:
+      (params.environment ?? company.dianConfiguration.environment) === "PRODUCTION" ? "1" : "2",
   } as unknown as DianKitConfig;
-  const result = await new DianKitProvider(config).lookupBuyer({
-    identificationType: params.identificationType,
-    identificationNumber: params.identificationNumber,
-  });
+  let result;
+  try {
+    result = await new DianKitProvider(config).lookupBuyer({
+      identificationType: params.identificationType,
+      identificationNumber: params.identificationNumber,
+    });
+  } catch (error) {
+    // The DIAN answers an unknown party with a bare HTTP 404 rather than a
+    // StatusCode in the body - that's "not found", not a failure.
+    if ((error as { statusCode?: number }).statusCode === 404) {
+      return { receiverName: "", receiverEmail: "", statusCode: "404", message: "DIAN: adquirente no encontrado" };
+    }
+    throw error;
+  }
   return {
     receiverName: result.receiverName,
     receiverEmail: result.receiverEmail,

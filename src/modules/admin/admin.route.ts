@@ -324,7 +324,7 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   // DIAN GetAcquirer (name + e-invoice email for a NIT/cédula), signed with
   // this company's certificate - see admin.service.ts's lookupAcquirer.
   // Backs Ohnix's customer/supplier "buscar por NIT" autocomplete.
-  app.get<{ Params: { id: string }; Querystring: { identificationType?: string; identificationNumber?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { identificationType?: string; identificationNumber?: string; environment?: string } }>(
     "/api/v1/admin/companies/:id/acquirer",
     async (request, reply) => {
       const identificationType = `${request.query.identificationType || ""}`.trim();
@@ -332,7 +332,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       if (!/^\d{2}$/.test(identificationType) || identificationNumber.length < 5 || identificationNumber.length > 15) {
         return reply.code(400).send({ message: "identificationType (2 digits) and identificationNumber (5-15 digits) are required" });
       }
-      const result = await lookupAcquirer({ companyId: request.params.id, identificationType, identificationNumber });
+      const environment = request.query.environment === "PRODUCTION" ? "PRODUCTION" : request.query.environment === "SANDBOX" ? "SANDBOX" : undefined;
+      const result = await lookupAcquirer({ companyId: request.params.id, identificationType, identificationNumber, environment });
       return reply.code(200).send(result);
     },
   );
