@@ -109,7 +109,7 @@ function addEarningsNode(parent: XMLBuilder, doc: PayrollDocument): void {
     devengados.ele("Bonificaciones").ele("Pago").txt(formatAmount(sumAmount(bonificaciones)));
   }
 
-  const known = new Set(["basico", "transporte", "vacaciones", "prima", "cesantias", "intereses_cesantias", "bonificacion"]);
+  const known = new Set(["basico", "transporte", "vacaciones", "prima", "cesantias", "intereses_cesantias", "bonificacion", "comision"]);
   const other = lines.filter(
     (l) => !known.has(l.concept) && !l.concept.startsWith("horas_extra") && !l.concept.startsWith("recargo"),
   );
@@ -120,6 +120,16 @@ function addEarningsNode(parent: XMLBuilder, doc: PayrollDocument): void {
       item.att("Concepto", line.description ?? line.concept);
       item.ele("Pago").txt(formatAmount(line.amount));
     }
+  }
+
+  // Comisiones de ventas (salarial, CST art. 127) - one <Comision> per line.
+  // In the Anexo's Devengados sequence it comes after OtrosConceptos
+  // (Compensaciones/BonoEPCTVs, not emitted here, sit in between) and
+  // before PagosTerceros.
+  const comisiones = linesByFamily(lines, "comision");
+  if (comisiones.length > 0) {
+    const node = devengados.ele("Comisiones");
+    for (const line of comisiones) node.ele("Comision").txt(formatAmount(line.amount));
   }
 
   devengados.ele("TotalDevengado").txt(formatAmount(doc.earnings.total));

@@ -61,6 +61,22 @@ export async function setDianConfiguration(params: SetDianConfigurationParams) {
   });
 }
 
+/**
+ * Flips ONLY the environment of an existing DianConfiguration (the
+ * SANDBOX -> PRODUCTION step once DIAN approves a company's habilitación).
+ * The full PUT above needs softwarePin/technicalKey, which the caller (Ohnix)
+ * deliberately never keeps a copy of - so without this, going live meant
+ * re-typing the PIN by hand. Throws if there's no configuration yet: there
+ * is nothing to promote. Returns only non-secret fields.
+ */
+export async function setDianEnvironment(companyId: string, environment: "PRODUCTION" | "SANDBOX") {
+  const config = await prisma.dianConfiguration.update({
+    where: { companyId },
+    data: { environment },
+  });
+  return { companyId: config.companyId, environment: config.environment, softwareId: config.softwareId };
+}
+
 export interface CreateNumberingResolutionParams {
   companyId: string;
   documentType: "01" | "91" | "92" | "05";
@@ -214,6 +230,19 @@ export interface DianReadiness {
     isCurrent: boolean;
   }>;
   certificates: FirmaPassStatusCertificate[];
+  /**
+   * The non-secret part of DianConfiguration.supplierProfile (who the
+   * issuer is and where) - Ohnix prints it on the invoice's representación
+   * gráfica, and this service is the only place it is stored. Null until a
+   * DianConfiguration exists.
+   */
+  supplier: {
+    name: string | null;
+    identification: unknown;
+    fiscalResponsibilities: unknown;
+    address: unknown;
+    email: string | null;
+  } | null;
 }
 
 /**
@@ -289,6 +318,19 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
       expiresAt: certificate.expiresAt,
       createdAt: certificate.createdAt,
     })),
+    supplier: supplierSummary(company.dianConfiguration?.supplierProfile),
+  };
+}
+
+function supplierSummary(profile: unknown): DianReadiness["supplier"] {
+  if (!profile || typeof profile !== "object") return null;
+  const p = profile as Record<string, unknown>;
+  return {
+    name: typeof p.name === "string" ? p.name : null,
+    identification: p.identification ?? null,
+    fiscalResponsibilities: p.fiscalResponsibilities ?? null,
+    address: p.address ?? null,
+    email: typeof p.email === "string" ? p.email : null,
   };
 }
 

@@ -9,6 +9,7 @@ import {
   FirmaPassUploadRutBodySchema,
   SetCertificateProviderOverrideBodySchema,
   SetDianConfigurationBodySchema,
+  SetDianEnvironmentBodySchema,
   UpdateNumberingResolutionBodySchema,
   UploadCertificateBodySchema,
   ViafirmaRevokeBodySchema,
@@ -30,6 +31,7 @@ import {
   refreshDocumentStatus,
   setCertificateProviderOverride,
   setDianConfiguration,
+  setDianEnvironment,
   updateNumberingResolution,
   uploadCertificate,
   type RefreshableDocumentType,
@@ -77,6 +79,22 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     const body = SetDianConfigurationBodySchema.parse(request.body);
     const config = await setDianConfiguration({ companyId: request.params.id, ...body });
     return reply.send(config);
+  });
+
+  // Environment-only promotion (SANDBOX -> PRODUCTION) - see
+  // admin.service.ts's setDianEnvironment for why the full PUT above isn't
+  // usable for this.
+  app.patch<{ Params: { id: string } }>("/api/v1/admin/companies/:id/dian-configuration/environment", async (request, reply) => {
+    const body = SetDianEnvironmentBodySchema.parse(request.body);
+    try {
+      const config = await setDianEnvironment(request.params.id, body.environment);
+      return reply.send(config);
+    } catch (error) {
+      if ((error as { code?: string })?.code === "P2025") {
+        return reply.code(404).send({ error: "dian_configuration_not_found", message: "This company has no DIAN configuration to promote" });
+      }
+      throw error;
+    }
   });
 
   app.post<{ Params: { id: string } }>(

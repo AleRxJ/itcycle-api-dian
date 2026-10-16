@@ -18,6 +18,10 @@ export const SetDianConfigurationBodySchema = z.object({
   supplierProfile: z.record(z.string(), z.unknown()),
 });
 
+export const SetDianEnvironmentBodySchema = z.object({
+  environment: z.enum(["PRODUCTION", "SANDBOX"]),
+});
+
 export const CreateNumberingResolutionBodySchema = z.object({
   documentType: z.enum(["01", "91", "92", "05"]),
   prefix: z.string(),
