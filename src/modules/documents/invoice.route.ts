@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import { CreateInvoiceBodySchema, RetrySendBodySchema } from "./documents.schemas.js";
-import { createInvoice, getInvoice, retryInvoiceSend } from "./invoice.service.js";
+import { createInvoice, getInvoice, getInvoiceSignedXml, retryInvoiceSend } from "./invoice.service.js";
 
 /**
  * Production invoice endpoints. Gated by requireApiKey (registered in
@@ -30,6 +30,17 @@ export async function registerInvoiceRoutes(app: FastifyInstance): Promise<void>
       return reply.code(404).send({ error: "not_found" });
     }
     return reply.send(invoice);
+  });
+
+  // The signed XML exactly as it went to DIAN (404 when the invoice isn't this
+  // company's or was never signed). Scoped by the API key's company, like every
+  // other route here.
+  app.get<{ Params: { id: string } }>("/api/v1/documents/invoices/:id/xml", async (request, reply) => {
+    const signed = await getInvoiceSignedXml(request.company!.id, request.params.id);
+    if (!signed) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    return reply.type("application/xml").send(signed.xml);
   });
 
   app.post<{ Params: { id: string } }>("/api/v1/documents/invoices/:id/retry-send", async (request, reply) => {

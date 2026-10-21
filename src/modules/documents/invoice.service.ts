@@ -255,6 +255,26 @@ export async function retryInvoiceSend(
   });
 }
 
+/**
+ * The signed UBL XML stored for an invoice (what DIAN received), for the
+ * company's own customers' delivery - Ohnix attaches it to the e-invoice email
+ * next to the PDF. Null when the invoice doesn't exist for this company or has
+ * no stored XML (an ERROR before signing).
+ */
+export async function getInvoiceSignedXml(
+  companyId: string,
+  id: string,
+  deps: Pick<DocumentServiceDeps, "xmlStore"> = {},
+): Promise<{ xml: string; invoiceNumber: string | null } | null> {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, companyId },
+    select: { xmlReference: true, invoiceNumber: true },
+  });
+  if (!invoice?.xmlReference) return null;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  return { xml: await xmlStore.get(invoice.xmlReference), invoiceNumber: invoice.invoiceNumber };
+}
+
 export async function getInvoice(companyId: string, id: string) {
   return prisma.invoice.findFirst({ where: { id, companyId }, include: { certificate: true } });
 }
