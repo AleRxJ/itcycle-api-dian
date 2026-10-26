@@ -179,3 +179,13 @@ describe("TaxSubtotalSchema — per-unit taxes", () => {
     expect(TaxSubtotalSchema.safeParse({ taxableAmount: 0, taxAmount: 132, taxScheme: { code: "22" } }).success).toBe(false);
   });
 });
+
+describe("InvoiceLineSchema — free lines", () => {
+  const line = { id: "1", quantity: 2, description: "Bolsa", lineExtensionAmount: 0, taxTotals: [{ taxAmount: 132, subtotals: [{ taxableAmount: 0, taxAmount: 132, perUnitAmount: 66, baseUnitMeasure: { quantity: 1, unitCode: "94" }, taxScheme: { code: "22" } }] }] };
+  it("accepts price 0 with a referencePrice", () => {
+    expect(InvoiceLineSchema.safeParse({ ...line, price: 0, referencePrice: 50 }).success).toBe(true);
+  });
+  it("rejects price 0 without a referencePrice", () => {
+    expect(InvoiceLineSchema.safeParse({ ...line, price: 0 }).success).toBe(false);
+  });
+});

@@ -198,8 +198,16 @@ export interface InvoiceLine {
    * a formal UNSPSC code) is valid here. Defaults to "N/A" when omitted.
    */
   standardItemCode?: string;
-  /** Unit price before taxes */
+  /** Unit price before taxes (0 for a free line - then referencePrice is required) */
   price: number;
+  /**
+   * Commercial reference value per unit for a line given at no charge
+   * (price 0, e.g. a plastic bag that only carries INC bolsas). DIAN only
+   * accepts a zero-priced line with this reference: written as
+   * cac:PricingReference/cac:AlternativeConditionPrice, PriceTypeCode "01"
+   * (valor comercial).
+   */
+  referencePrice?: number;
   /** Total line amount before taxes (quantity * price, adjusted for allowances/charges) */
   lineExtensionAmount: number;
   /** Line-level allowances (discounts) and charges (surcharges) */

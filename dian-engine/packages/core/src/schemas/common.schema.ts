@@ -162,17 +162,24 @@ export const AllowanceChargeSchema = z.object({
  * nonnegative line extension amount, and at least one tax total.
  * Unit code defaults to "EA" (each) if not specified.
  */
-export const InvoiceLineSchema = z.object({
-  id: z.string().min(1),
-  quantity: z.number().positive(),
-  unitCode: z.string().default("EA"),
-  description: z.string().min(1),
-  standardItemCode: z.string().default("N/A"),
-  price: z.number().positive(),
-  lineExtensionAmount: z.number().nonnegative(),
-  allowanceCharges: z.array(AllowanceChargeSchema).optional(),
-  taxTotals: z.array(TaxTotalSchema).min(1),
-});
+export const InvoiceLineSchema = z
+  .object({
+    id: z.string().min(1),
+    quantity: z.number().positive(),
+    unitCode: z.string().default("EA"),
+    description: z.string().min(1),
+    standardItemCode: z.string().default("N/A"),
+    // 0 only for a free line, which must then state its commercial reference value.
+    price: z.number().nonnegative(),
+    referencePrice: z.number().positive().optional(),
+    lineExtensionAmount: z.number().nonnegative(),
+    allowanceCharges: z.array(AllowanceChargeSchema).optional(),
+    taxTotals: z.array(TaxTotalSchema).min(1),
+  })
+  .refine((line) => line.price > 0 || line.referencePrice !== undefined, {
+    message: "A zero-priced line needs a referencePrice (PricingReference, valor comercial)",
+    path: ["price"],
+  });
 
 /**
  * Validates the legal monetary totals for the document.

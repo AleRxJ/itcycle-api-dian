@@ -565,7 +565,7 @@ describe("buildInvoiceXml — INC bolsas (tax per unit, code 22)", () => {
     ...base,
     lines: [
       ...base.lines,
-      { id: "3", quantity: 3, unitCode: "94", description: "Bolsa plástica", price: 0, lineExtensionAmount: 0, taxTotals: [bagTax] },
+      { id: "3", quantity: 3, unitCode: "94", description: "Bolsa plástica", price: 0, referencePrice: 50, lineExtensionAmount: 0, taxTotals: [bagTax] },
     ],
     taxTotals: [...base.taxTotals, bagTax],
   };
@@ -582,6 +582,15 @@ describe("buildInvoiceXml — INC bolsas (tax per unit, code 22)", () => {
       // UBL order: the per-unit pair comes before TaxCategory.
       expect(sub.indexOf("PerUnitAmount")).toBeLessThan(sub.indexOf("TaxCategory"));
     }
+  });
+
+  it("states the free bag's commercial value (PricingReference) before its taxes, and only on that line", () => {
+    const bagLine = xml.slice(xml.lastIndexOf("<cac:InvoiceLine>"));
+    expect(bagLine).toContain("<cac:AlternativeConditionPrice>");
+    expect(bagLine.indexOf("PricingReference")).toBeGreaterThan(bagLine.indexOf("LineExtensionAmount"));
+    expect(bagLine.indexOf("PricingReference")).toBeLessThan(bagLine.indexOf("<cac:TaxTotal>"));
+    expect(bagLine).toMatch(/<cbc:PriceAmount currencyID="COP">50\.00<\/cbc:PriceAmount>\s*<cbc:PriceTypeCode>01<\/cbc:PriceTypeCode>/);
+    expect(xml.split("PricingReference").length - 1).toBe(2); // open + close tag, one line only
   });
 
   it("keeps Percent on percentage taxes and leaves the CUFE tax slots alone", () => {

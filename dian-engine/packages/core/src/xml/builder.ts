@@ -414,6 +414,14 @@ function addLineNode(
     .att("currencyID", currency)
     .txt(formatAmount(line.lineExtensionAmount));
 
+  // A free line (price 0) states its commercial value - DIAN rejects a
+  // zero-priced line without it. UBL order: before AllowanceCharge/TaxTotal.
+  if (line.price === 0 && line.referencePrice !== undefined) {
+    const alternative = node.ele(NS.CAC, "PricingReference").ele(NS.CAC, "AlternativeConditionPrice");
+    alternative.ele(NS.CBC, "PriceAmount").att("currencyID", currency).txt(formatAmount(line.referencePrice));
+    alternative.ele(NS.CBC, "PriceTypeCode").txt("01");
+  }
+
   if (line.allowanceCharges) {
     for (const ac of line.allowanceCharges) {
       addAllowanceChargeNode(node, ac, currency);
@@ -570,7 +578,8 @@ function buildQRCode(doc: DianDocument, uuid: string): string {
     `DocAdq: ${doc.customer.identification.number}`,
     `ValFac: ${formatAmount(doc.legalMonetaryTotal.lineExtensionAmount)}`,
     `ValIva: ${formatAmount(getTaxAmount(doc, TaxCode.IVA))}`,
-    `ValOtroIm: ${formatAmount(getTaxAmount(doc, TaxCode.INC) + getTaxAmount(doc, TaxCode.ICA))}`,
+    // "Otros impuestos": INC, ICA and INC bolsas ("22", a value per bag).
+    `ValOtroIm: ${formatAmount(getTaxAmount(doc, TaxCode.INC) + getTaxAmount(doc, TaxCode.ICA) + getTaxAmount(doc, "22"))}`,
     `ValTotFac: ${formatAmount(doc.legalMonetaryTotal.payableAmount)}`,
     `${hashLabel}: ${uuid}`,
     `${catalogBase}document/searchqr?documentkey=${uuid}`,
