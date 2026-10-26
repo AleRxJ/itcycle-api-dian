@@ -11,6 +11,7 @@ import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js"
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
+import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
 
 /**
  * Nómina Electrónica document issuance - added alongside invoice.service.ts/
@@ -86,7 +87,12 @@ export async function createPayrollDocument(params: CreatePayrollDocumentParams,
         `Payroll document ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
       );
     }
-    return existing;
+    // Never signed, never sent (e.g. orphaned by a restart before signing):
+    // issue it afresh under the same reference instead of returning that
+    // ERROR forever - see releaseUnsentErrorDocument.
+    if (!(await releaseUnsentErrorDocument(existing, xmlStore, (internalReference) => prisma.payrollDocument.update({ where: { id: existing.id }, data: { internalReference } })))) {
+      return existing;
+    }
   }
 
   const { numbering, certificateId, config } = await loadDianConfig(
@@ -266,7 +272,12 @@ export async function createPayrollAdjustment(params: CreatePayrollAdjustmentPar
         `Payroll adjustment ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
       );
     }
-    return existing;
+    // Never signed, never sent (e.g. orphaned by a restart before signing):
+    // issue it afresh under the same reference instead of returning that
+    // ERROR forever - see releaseUnsentErrorDocument.
+    if (!(await releaseUnsentErrorDocument(existing, xmlStore, (internalReference) => prisma.payrollAdjustment.update({ where: { id: existing.id }, data: { internalReference } })))) {
+      return existing;
+    }
   }
 
   const payrollDocument = await prisma.payrollDocument.findFirst({

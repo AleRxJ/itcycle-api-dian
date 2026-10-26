@@ -302,8 +302,17 @@ function addTaxTotalNode(parent: XMLBuilder, taxTotal: TaxTotal, currency: strin
       .txt(formatAmount(subtotal.taxableAmount));
     sub.ele(NS.CBC, "TaxAmount").att("currencyID", currency).txt(formatAmount(subtotal.taxAmount));
 
+    // A tax charged as a fixed value per unit (INC bolsas, code "22") states
+    // its base unit and value per unit instead of a percentage (UBL order:
+    // BaseUnitMeasure and PerUnitAmount come right before TaxCategory).
+    const perUnit = subtotal.perUnitAmount !== undefined && subtotal.baseUnitMeasure !== undefined;
+    if (perUnit) {
+      sub.ele(NS.CBC, "BaseUnitMeasure").att("unitCode", subtotal.baseUnitMeasure!.unitCode).txt(subtotal.baseUnitMeasure!.quantity.toFixed(6));
+      sub.ele(NS.CBC, "PerUnitAmount").att("currencyID", currency).txt(formatAmount(subtotal.perUnitAmount!));
+    }
+
     const taxCategory = sub.ele(NS.CAC, "TaxCategory");
-    taxCategory.ele(NS.CBC, "Percent").txt(formatPercent(subtotal.percent));
+    if (!perUnit) taxCategory.ele(NS.CBC, "Percent").txt(formatPercent(subtotal.percent ?? 0));
 
     const scheme = taxCategory.ele(NS.CAC, "TaxScheme");
     scheme.ele(NS.CBC, "ID").txt(subtotal.taxScheme.code);

@@ -170,3 +170,12 @@ describe("Zod Schemas", () => {
     });
   });
 });
+
+describe("TaxSubtotalSchema — per-unit taxes", () => {
+  it("accepts INC bolsas with a per-unit amount and base unit, without percent", () => {
+    expect(TaxSubtotalSchema.safeParse({ taxableAmount: 0, taxAmount: 132, perUnitAmount: 66, baseUnitMeasure: { quantity: 1, unitCode: "94" }, taxScheme: { code: "22" } }).success).toBe(true);
+  });
+  it("rejects a subtotal with neither a percent nor a per-unit amount", () => {
+    expect(TaxSubtotalSchema.safeParse({ taxableAmount: 0, taxAmount: 132, taxScheme: { code: "22" } }).success).toBe(false);
+  });
+});

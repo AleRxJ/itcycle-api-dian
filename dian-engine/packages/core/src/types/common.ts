@@ -131,10 +131,18 @@ export interface PersonInfo {
 export interface TaxSubtotal {
   /** Taxable base amount before tax is applied */
   taxableAmount: number;
-  /** Calculated tax amount (taxableAmount * percent / 100) */
+  /** Calculated tax amount (taxableAmount * percent / 100, or units x perUnitAmount) */
   taxAmount: number;
-  /** Tax rate percentage (e.g., 19 for 19% IVA) */
-  percent: number;
+  /**
+   * Tax rate percentage (e.g., 19 for 19% IVA). Omitted for a tax charged as
+   * a fixed value per unit (INC bolsas plásticas, code "22"): those carry
+   * baseUnitMeasure + perUnitAmount instead, and no cbc:Percent is written.
+   */
+  percent?: number;
+  /** Fixed tax value per base unit (e.g. per plastic bag) - per-unit taxes only */
+  perUnitAmount?: number;
+  /** The unit perUnitAmount applies to (e.g. 1 x "94" = one unit) - per-unit taxes only */
+  baseUnitMeasure?: { quantity: number; unitCode: string };
   /** Tax scheme identifying which tax this subtotal belongs to */
   taxScheme: TaxScheme;
 }

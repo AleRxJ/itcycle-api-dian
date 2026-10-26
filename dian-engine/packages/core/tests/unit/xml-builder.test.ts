@@ -557,3 +557,35 @@ describe("buildDebitNoteXml — Nota Débito (type 92)", () => {
     expect(xml).toContain("124950.00");
   });
 });
+
+describe("buildInvoiceXml — INC bolsas (tax per unit, code 22)", () => {
+  const base = createTestDocument(DocumentType.POS);
+  const bagTax = { taxAmount: 198, subtotals: [{ taxableAmount: 0, taxAmount: 198, perUnitAmount: 66, baseUnitMeasure: { quantity: 1, unitCode: "94" }, taxScheme: { code: "22" } }] };
+  const doc: DianDocument = {
+    ...base,
+    lines: [
+      ...base.lines,
+      { id: "3", quantity: 3, unitCode: "94", description: "Bolsa plástica", price: 0, lineExtensionAmount: 0, taxTotals: [bagTax] },
+    ],
+    taxTotals: [...base.taxTotals, bagTax],
+  };
+  const xml = buildInvoiceXml(doc, generateCufe(doc), generateSoftwareSecurityCode(doc.software.id, doc.software.pin, doc.id));
+  const bagSubtotals = xml.split("<cac:TaxSubtotal>").slice(1).filter((s) => s.includes("<cbc:ID>22</cbc:ID>"));
+
+  it("writes BaseUnitMeasure and PerUnitAmount, and no Percent, for the bag tax", () => {
+    expect(bagSubtotals.length).toBe(2); // line + document level
+    for (const sub of bagSubtotals) {
+      expect(sub).toContain('<cbc:BaseUnitMeasure unitCode="94">1.000000</cbc:BaseUnitMeasure>');
+      expect(sub).toContain('<cbc:PerUnitAmount currencyID="COP">66.00</cbc:PerUnitAmount>');
+      expect(sub).toContain("<cbc:Name>INC Bolsas</cbc:Name>");
+      expect(sub).not.toContain("<cbc:Percent>");
+      // UBL order: the per-unit pair comes before TaxCategory.
+      expect(sub.indexOf("PerUnitAmount")).toBeLessThan(sub.indexOf("TaxCategory"));
+    }
+  });
+
+  it("keeps Percent on percentage taxes and leaves the CUFE tax slots alone", () => {
+    expect(xml).toContain("<cbc:Percent>19.00</cbc:Percent>");
+    expect(generateCufe(doc)).toBe(generateCufe(base));
+  });
+});

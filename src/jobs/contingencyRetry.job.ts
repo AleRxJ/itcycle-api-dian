@@ -9,6 +9,7 @@ import { retryPayrollAdjustmentSend, retryPayrollDocumentSend } from "../modules
 import { retrySupportDocumentSend } from "../modules/documents/supportDocument.service.js";
 import { prisma } from "../infrastructure/prisma.js";
 import { env } from "../shared/env.js";
+import { reconcileOrphanedProcessingDocuments } from "../shared/startupReconcile.js";
 
 export interface ContingencyRetrySummary {
   attempted: number;
@@ -139,7 +140,11 @@ export function startContingencyRetryScheduler(logger?: FastifyBaseLogger): void
   }
 
   cron.schedule(env.contingencyRetryCron, () => {
-    retryAllContingencyDocuments(logger).then((summary) => {
+    // Orphans first: a document recovered into CONTINGENCY here is resent by
+    // the retry right after, in the same sweep.
+    reconcileOrphanedProcessingDocuments(logger)
+      .catch((error) => logger?.error({ error }, "orphaned PROCESSING reconcile crashed"))
+      .then(() => retryAllContingencyDocuments(logger)).then((summary) => {
       if (summary.attempted > 0) {
         logger?.info({ summary }, "contingency retry sweep completed");
       }

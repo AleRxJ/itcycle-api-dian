@@ -121,12 +121,20 @@ export const PartySchema = z.object({
  * Validates a single tax subtotal with nonnegative amounts and a valid tax scheme.
  * Enforces that taxableAmount, taxAmount, and percent are all zero or positive.
  */
-export const TaxSubtotalSchema = z.object({
-  taxableAmount: z.number().nonnegative(),
-  taxAmount: z.number().nonnegative(),
-  percent: z.number().nonnegative(),
-  taxScheme: TaxSchemeSchema,
-});
+export const TaxSubtotalSchema = z
+  .object({
+    taxableAmount: z.number().nonnegative(),
+    taxAmount: z.number().nonnegative(),
+    // A percentage tax carries `percent`; a fixed-value-per-unit tax (INC
+    // bolsas, code "22") carries `perUnitAmount` + `baseUnitMeasure` instead.
+    percent: z.number().nonnegative().optional(),
+    perUnitAmount: z.number().nonnegative().optional(),
+    baseUnitMeasure: z.object({ quantity: z.number().positive(), unitCode: z.string().min(1) }).optional(),
+    taxScheme: TaxSchemeSchema,
+  })
+  .refine((sub) => sub.percent !== undefined || (sub.perUnitAmount !== undefined && sub.baseUnitMeasure !== undefined), {
+    message: "A tax subtotal needs a percent, or a perUnitAmount with its baseUnitMeasure",
+  });
 
 /**
  * Validates a tax total group with at least one subtotal.

@@ -11,6 +11,7 @@ import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js"
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
+import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
@@ -62,7 +63,12 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
         `Credit note ${params.internalReference} is still being processed (status=PROCESSING since ${existing.createdAt.toISOString()}) — retry shortly.`,
       );
     }
-    return existing;
+    // Never signed, never sent (e.g. orphaned by a restart before signing):
+    // issue it afresh under the same reference instead of returning that
+    // ERROR forever - see releaseUnsentErrorDocument.
+    if (!(await releaseUnsentErrorDocument(existing, xmlStore, (internalReference) => prisma.creditNote.update({ where: { id: existing.id }, data: { internalReference } })))) {
+      return existing;
+    }
   }
 
   const invoice = await prisma.invoice.findFirst({
