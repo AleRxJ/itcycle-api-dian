@@ -580,7 +580,13 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
   const cufe = (record as { cufe?: string | null }).cufe ?? null;
   // A REJECTED whose only "reason" is DIAN not understanding our own status
   // query was never a DIAN verdict - re-ask (by CUFE) instead of keeping it.
-  const misrecorded = record.status === "REJECTED" && Boolean(cufe) && (isBadTrackIdAnswer(record.statusDescription) || isBadTrackIdAnswer(record.errorMessage));
+  const simulatedDocument = Boolean((record as { simulated?: boolean }).simulated);
+  const misrecorded = Boolean(cufe) && !simulatedDocument && (
+    (record.status === "REJECTED" && (isBadTrackIdAnswer(record.statusDescription) || isBadTrackIdAnswer(record.errorMessage)))
+    // A REAL document "accepted" by the simulator (a local instance with
+    // DIAN_SIMULATION_MODE on, pointed at production data) - never DIAN's word.
+    || (record.status === "ACCEPTED" && /^\[SIMULADO\]/.test(record.statusDescription ?? ""))
+  );
   if (record.status !== "SENT" && !misrecorded) {
     // Already terminal (or never sent) - nothing to refresh.
     return record;
@@ -602,7 +608,9 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
   const numberingDocumentType = params.documentType === "NE_ADJUSTMENT" ? "NE" : params.documentType;
   const secretStore = createDefaultCertificateSecretStore();
   const { config } = await loadDianConfig({ companyId: params.companyId, documentType: numberingDocumentType }, secretStore);
-  const provider = env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
+  // The simulator only answers for documents it produced; a real document is
+  // always asked to the real DIAN (read-only), whatever this instance's mode.
+  const provider = simulatedDocument ? new SimulatedDianProvider(config) : new DianKitProvider(config);
 
   // A real async ZipKey -> GetStatusZip; anything else (a sync send's file
   // name stored as trackId by an older engine, or a misrecorded REJECTED) ->
@@ -615,6 +623,20 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
     // Our query was malformed - NOT a verdict on the document. Keep it as is
     // (and never overwrite the stored DIAN answer with this one).
     return record;
+  }
+
+  // Re-asking a misrecorded document (always a sync send - DIAN validated it
+  // on the spot): "not found" (66/90) can't mean "still processing" here. It
+  // means DIAN never accepted it, so record that - the sale can then be
+  // issued again instead of staying stuck on a verdict DIAN never gave.
+  if (misrecorded && !status.isValid && (status.statusCode === "66" || status.statusCode === "90")) {
+    return updateDocumentRecord(params.documentType, record.id, {
+      status: "REJECTED",
+      statusDescription: status.statusDescription || "La DIAN no tiene registrado este documento",
+      acceptedAt: null,
+      rejectedAt: new Date(),
+      errorMessage: `La DIAN no tiene registrado este documento (${status.statusCode}${status.statusDescription ? `: ${status.statusDescription}` : ""}). Vuelve a emitirlo.`,
+    });
   }
 
   if (status.statusCode === "66" || (!status.isValid && isStillValidatingMessage(status.statusDescription))) {

@@ -11,11 +11,12 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
-import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
+import { claimNextNumber, assertSimulationAllowed, loadDianConfig } from "./dianConfig.service.js";
 import { reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
+  assertSimulationAllowed(config);
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
 }
 
@@ -93,6 +94,7 @@ export async function createSupportDocument(params: CreateSupportDocumentParams,
     { companyId: params.companyId, documentType: "05" },
     secretStore,
   );
+  assertSimulationAllowed(config, Boolean(deps.createProvider));
   const { documentId } = await claimNextNumber(numbering.id);
 
   const supportDocumentRecord = await prisma.supportDocument.create({

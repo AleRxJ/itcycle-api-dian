@@ -8,12 +8,13 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
-import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
+import { claimNextNumber, assertSimulationAllowed, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
 import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
+  assertSimulationAllowed(config);
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
 }
 
@@ -88,6 +89,7 @@ export async function createCreditNote(params: CreateCreditNoteParams, deps: Doc
     { companyId: params.companyId, documentType: "91" },
     secretStore,
   );
+  assertSimulationAllowed(config, Boolean(deps.createProvider));
   const { documentId } = await claimNextNumber(numbering.id);
 
   const creditNoteRecord = await prisma.creditNote.create({

@@ -8,7 +8,7 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { env } from "../../shared/env.js";
 import { createDefaultDocumentXmlStore } from "../../shared/documentXmlStore.js";
 import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js";
-import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
+import { claimNextNumber, assertSimulationAllowed, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import type { DocumentServiceDeps } from "./invoice.service.js";
 import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
@@ -27,6 +27,7 @@ import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
  */
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
+  assertSimulationAllowed(config);
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
 }
 
@@ -99,6 +100,7 @@ export async function createPayrollDocument(params: CreatePayrollDocumentParams,
     { companyId: params.companyId, documentType: "NE" },
     secretStore,
   );
+  assertSimulationAllowed(config, Boolean(deps.createProvider));
   const { documentId } = await claimNextNumber(numbering.id);
 
   const payrollRecord = await prisma.payrollDocument.create({
@@ -297,6 +299,7 @@ export async function createPayrollAdjustment(params: CreatePayrollAdjustmentPar
     { companyId: params.companyId, documentType: "NE" },
     secretStore,
   );
+  assertSimulationAllowed(config, Boolean(deps.createProvider));
   const { documentId } = await claimNextNumber(numbering.id);
 
   const adjustmentRecord = await prisma.payrollAdjustment.create({

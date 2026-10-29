@@ -1,6 +1,7 @@
 import type { DianKitConfig, Party } from "@dian-kit/sdk-node";
 
 import { prisma } from "../../infrastructure/prisma.js";
+import { env } from "../../shared/env.js";
 import type { CertificateSecretStore } from "../../providers/certificates/CertificateSecretStore.js";
 
 /**
@@ -73,6 +74,22 @@ export async function findSigningCertificate(
  * test-invoice.service.ts (see docs/dian/sandbox-tests.md) — that dev-only
  * path is left untouched to avoid any risk to its verified Sandbox run.
  */
+/**
+ * DIAN_SIMULATION_MODE fakes DIAN's answer - fine for a sandbox/demo company,
+ * never for one in PRODUCTION: a local copy pointed at the production
+ * database with simulation on once "accepted" a real invoice (MARH1,
+ * 2026-10-29) that DIAN never accepted. Called before a number is claimed,
+ * so a refused send never burns real numbering. Skipped when a test injects
+ * its own provider.
+ */
+export function assertSimulationAllowed(config: DianKitConfig, providerInjected = false): void {
+  if (!providerInjected && env.dianSimulationMode && `${(config as { environment?: string }).environment ?? ""}` === "1") {
+    throw new Error(
+      "DIAN_SIMULATION_MODE is on but this company is in PRODUCTION - refusing to simulate a real fiscal document. Turn simulation off (or point this instance at a non-production database).",
+    );
+  }
+}
+
 export async function loadDianConfig(
   params: LoadDianConfigParams,
   secretStore: CertificateSecretStore,
