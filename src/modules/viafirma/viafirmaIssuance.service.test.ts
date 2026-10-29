@@ -35,7 +35,12 @@ vi.mock("../../providers/certificates/ViafirmaCertificateProvider.js", async (im
 import { prisma } from "../../infrastructure/prisma.js";
 import { createCompany } from "../admin/admin.service.js";
 import { createDefaultCertificateSecretStore } from "../../shared/certificateStore.js";
-import { createViafirmaRequest, getViafirmaCertificateStatus } from "./viafirmaIssuance.service.js";
+import {
+  createViafirmaRequest,
+  discardViafirmaRequest,
+  downloadViafirmaCertificate,
+  getViafirmaCertificateStatus,
+} from "./viafirmaIssuance.service.js";
 
 const TEST_NIT = "999000009";
 const TEST_DV = "3";
@@ -80,8 +85,11 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  // One open request per company: each test starts with none.
+  const company = await prisma.company.findUnique({ where: { nit_dv: { nit: TEST_NIT, dv: TEST_DV } } });
+  if (company) await prisma.certificate.deleteMany({ where: { companyId: company.id } });
 });
 
 describe("createViafirmaRequest", () => {
@@ -217,5 +225,90 @@ describe("getViafirmaCertificateStatus", () => {
     expect(mockGetStatus).toHaveBeenCalledWith("REQ456");
 
     await expect(getViafirmaCertificateStatus({ companyId: "not-this-company", certificateId })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("downloadViafirmaCertificate", () => {
+  it("hands out nothing until issuance is finalized, then the .p12 + password, scoped by companyId", async () => {
+    const company = await createCompany({ name: "Viafirma Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    mockGetAvailableProfiles.mockResolvedValue([FAKE_PROFILE]);
+    mockCreateRequestFromCsr.mockResolvedValue({ codRequest: "REQ789", publicId: "PUB789" });
+
+    const { certificateId } = await createViafirmaRequest({
+      companyId: company.id,
+      profileKind: "FE-PJ",
+      subject: PJ_SUBJECT,
+      identityType: "IDC",
+      countryCode: "CO",
+      identity: "123",
+      emailCertificate: "info@mail.com",
+      termsAccepted: true,
+    });
+
+    // Pending: the store only holds the bare private key - never downloadable.
+    expect(await downloadViafirmaCertificate({ companyId: company.id, certificateId })).toBeNull();
+
+    // What viafirmaIssuance.job.ts does once the P7B is in.
+    const row = await prisma.certificate.findUniqueOrThrow({ where: { id: certificateId } });
+    await createDefaultCertificateSecretStore().save(row.secretReference, { p12: Buffer.from("P12-BYTES"), password: "s3cret" });
+    await prisma.certificate.update({ where: { id: certificateId }, data: { status: "ACTIVE" } });
+
+    const download = await downloadViafirmaCertificate({ companyId: company.id, certificateId });
+    expect(download).toMatchObject({ fileName: "certificado-viafirma-REQ789.p12", password: "s3cret" });
+    expect(Buffer.from(download!.p12Base64, "base64").toString()).toBe("P12-BYTES");
+
+    await expect(downloadViafirmaCertificate({ companyId: "not-this-company", certificateId })).rejects.toThrow(/not found/);
+  });
+});
+
+describe("one open request per company", () => {
+  const request = (companyId: string) =>
+    createViafirmaRequest({
+      companyId,
+      profileKind: "FE-PJ",
+      subject: PJ_SUBJECT,
+      identityType: "IDC",
+      countryCode: "CO",
+      identity: "123",
+      emailCertificate: "info@mail.com",
+      termsAccepted: true,
+    });
+
+  it("refuses a second request while one is open, without calling Viafirma", async () => {
+    const company = await createCompany({ name: "Viafirma Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    mockGetAvailableProfiles.mockResolvedValue([FAKE_PROFILE]);
+    mockCreateRequestFromCsr.mockResolvedValue({ codRequest: "REQ-OPEN", publicId: "PUB-OPEN" });
+    await request(company.id);
+    mockCreateRequestFromCsr.mockClear();
+
+    await expect(request(company.id)).rejects.toMatchObject({ statusCode: 409, code: "viafirma_request_already_open" });
+    expect(mockCreateRequestFromCsr).not.toHaveBeenCalled();
+    expect(await prisma.certificate.count({ where: { companyId: company.id } })).toBe(1);
+  });
+
+  it("allows a new request once the open one is discarded, and deletes its private key", async () => {
+    const company = await createCompany({ name: "Viafirma Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    mockGetAvailableProfiles.mockResolvedValue([FAKE_PROFILE]);
+    mockCreateRequestFromCsr.mockResolvedValue({ codRequest: "REQ-OLD", publicId: "PUB-OLD" });
+    const { certificateId } = await request(company.id);
+    const { secretReference } = await prisma.certificate.findUniqueOrThrow({ where: { id: certificateId } });
+
+    await expect(discardViafirmaRequest({ companyId: "not-this-company", certificateId })).rejects.toThrow(/not found/);
+    expect(await discardViafirmaRequest({ companyId: company.id, certificateId })).toEqual({ codRequest: "REQ-OLD" });
+    await expect(createDefaultCertificateSecretStore().get(secretReference)).rejects.toThrow();
+
+    mockCreateRequestFromCsr.mockResolvedValue({ codRequest: "REQ-NEW", publicId: "PUB-NEW" });
+    expect((await request(company.id)).codRequest).toBe("REQ-NEW");
+  });
+
+  it("never discards an issued certificate", async () => {
+    const company = await createCompany({ name: "Viafirma Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    mockGetAvailableProfiles.mockResolvedValue([FAKE_PROFILE]);
+    mockCreateRequestFromCsr.mockResolvedValue({ codRequest: "REQ-ISSUED", publicId: "PUB-ISSUED" });
+    const { certificateId } = await request(company.id);
+    await prisma.certificate.update({ where: { id: certificateId }, data: { status: "ACTIVE", expiresAt: new Date("2028-01-01") } });
+
+    await expect(discardViafirmaRequest({ companyId: company.id, certificateId })).rejects.toMatchObject({ statusCode: 409 });
+    expect(await prisma.certificate.count({ where: { id: certificateId } })).toBe(1);
   });
 });

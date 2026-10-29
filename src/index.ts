@@ -46,6 +46,9 @@ await registerOpenApiRoutes(app);
 // has Ohnix set to.
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof CertificateProviderTechnicalError) {
+    // The provider's real answer (status, path, raw body) only lives on
+    // `.cause` - log it, or a production failure leaves no trace to debug.
+    _request.log.error({ provider: error.provider, cause: error.cause }, error.message);
     return reply.code(502).send({
       statusCode: 502,
       error: "certificate_provider_technical_error",

@@ -74,11 +74,7 @@ export async function finalizePendingViafirmaCertificates(logger?: FastifyBaseLo
           data: { status: "ACTIVE", expiresAt },
         });
         summary.finalized += 1;
-      } else if (
-        internalStatus === "identity_rejected" ||
-        internalStatus === "issuance_failed" ||
-        internalStatus === "rues_verification_failed"
-      ) {
+      } else if (internalStatus === "identity_rejected" || internalStatus === "issuance_failed") {
         await secretStore.delete(row.secretReference);
         await prisma.certificate.delete({ where: { id: row.id } });
         summary.failed += 1;
@@ -87,6 +83,11 @@ export async function finalizePendingViafirmaCertificates(logger?: FastifyBaseLo
           "Viafirma certificate reached a terminal failure state — discarded",
         );
       } else {
+        // rues_verification_failed is NOT terminal: Viafirma's staff can fix
+        // the data and move the request on (2026-10-28, SY9X7S7CS went from
+        // rues_error to accreditation). Deleting it here lost the private key
+        // of a request that was still alive. It stays until it moves or the
+        // applicant discards it (viafirmaIssuance.service.ts).
         // pending_provider_review / awaiting_identity_verification /
         // verifying_identity / awaiting_documents — nothing to do here;
         // awaiting_documents is surfaced to the user via

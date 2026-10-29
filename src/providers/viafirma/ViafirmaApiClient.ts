@@ -114,8 +114,12 @@ export class ViafirmaApiClient {
 
   /** GET /ra/profile/{codProfile}/form?required=true — §3.3. */
   async getProfileForm(codProfile: string): Promise<ViafirmaProfileFormField[]> {
+    // codProfile is base64 and ends in "=" padding. Viafirma does not decode
+    // "%3D" in this path segment - it answers 200 with its HTML error page,
+    // which surfaced as "Viafirma no respondió correctamente". "=" is legal
+    // in a path segment, so it is sent literally.
     const result = await this.request<{ items: ViafirmaProfileFormField[] }>(
-      `/ra/profile/${encodeURIComponent(codProfile)}/form?required=true`,
+      `/ra/profile/${encodeURIComponent(codProfile).replace(/%3D/g, "=")}/form?required=true`,
     );
     return result.items;
   }

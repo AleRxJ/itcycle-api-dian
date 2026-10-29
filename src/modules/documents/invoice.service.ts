@@ -293,10 +293,14 @@ export async function getInvoice(companyId: string, id: string) {
  * as-is and validated by dian-kit's own Zod schema inside createInvoice.
  */
 function toInvoiceInput(raw: Record<string, unknown>, documentId: string): InvoiceInput {
+  // A credit invoice (paymentForm "2") carries paymentMeans.dueDate, also an
+  // ISO string over HTTP - dian-kit's PaymentMeansSchema wants a Date.
+  const paymentMeans = raw.paymentMeans as Record<string, unknown> | undefined;
   return {
     ...raw,
     id: documentId,
     issueDate: new Date(raw.issueDate as string),
     issueTime: new Date(raw.issueTime as string),
+    ...(paymentMeans?.dueDate ? { paymentMeans: { ...paymentMeans, dueDate: new Date(paymentMeans.dueDate as string) } } : {}),
   } as InvoiceInput;
 }

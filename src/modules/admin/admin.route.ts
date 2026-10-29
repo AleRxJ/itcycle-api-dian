@@ -47,9 +47,11 @@ import {
 } from "../firmapass/firmaPassIssuance.service.js";
 import {
   createViafirmaRequest,
+  discardViafirmaRequest,
   getViafirmaCertificateStatus,
   getViafirmaKycLink,
   getViafirmaProfileTerms,
+  downloadViafirmaCertificate,
   listViafirmaCertificates,
   listViafirmaDocuments,
   revokeViafirmaCertificate,
@@ -284,6 +286,40 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
     "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/documents",
     async (request, reply) => {
       const result = await listViafirmaDocuments({ companyId: request.params.id, certificateId: request.params.certificateId });
+      return reply.send(result);
+    },
+  );
+
+  // The .p12 + password, for the owning company to keep its own copy. 409
+  // until issuance is finalized (see downloadViafirmaCertificate).
+  app.get<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/download",
+    async (request, reply) => {
+      const result = await downloadViafirmaCertificate({
+        companyId: request.params.id,
+        certificateId: request.params.certificateId,
+      });
+      if (!result) {
+        return reply.code(409).send({
+          statusCode: 409,
+          error: "certificate_not_ready",
+          message: "The certificate is not issued yet, so there is nothing to download.",
+        });
+      }
+      reply.header("Cache-Control", "no-store");
+      return reply.send(result);
+    },
+  );
+
+  // Drops a request that was never issued (and its private key) so a new one
+  // can be submitted; Viafirma has to be asked to reject it on their side.
+  app.post<{ Params: { id: string; certificateId: string } }>(
+    "/api/v1/admin/companies/:id/viafirma/certificates/:certificateId/discard",
+    async (request, reply) => {
+      const result = await discardViafirmaRequest({
+        companyId: request.params.id,
+        certificateId: request.params.certificateId,
+      });
       return reply.send(result);
     },
   );

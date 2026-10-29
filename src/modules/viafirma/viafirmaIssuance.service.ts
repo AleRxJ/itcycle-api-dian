@@ -107,6 +107,33 @@ async function requireViafirmaCertificate(companyId: string, certificateId: stri
   return certificate;
 }
 
+// Submitted but not issued yet: the same rows viafirmaIssuance.job.ts polls.
+// (A revoked certificate is INACTIVE too, but it has an expiresAt.)
+function findOpenViafirmaRequest(companyId: string) {
+  return prisma.certificate.findFirst({
+    where: { companyId, provider: "viafirma", status: "INACTIVE", expiresAt: null },
+  });
+}
+
+/**
+ * Stops tracking a request that was never issued and deletes its private
+ * key, so a new one can be submitted. Viafirma has no API to cancel a
+ * request in progress: the applicant has to ask Viafirma to reject it, and
+ * Ohnix's UI says so. Refuses anything already issued (that is revoke).
+ */
+export async function discardViafirmaRequest(params: { companyId: string; certificateId: string }): Promise<{ codRequest: string }> {
+  const certificate = await requireViafirmaCertificate(params.companyId, params.certificateId);
+  if (certificate.status !== "INACTIVE" || certificate.expiresAt !== null) {
+    throw Object.assign(new Error("Only a request that was never issued can be discarded"), {
+      statusCode: 409,
+      code: "viafirma_request_not_discardable",
+    });
+  }
+  await createDefaultCertificateSecretStore().delete(certificate.secretReference);
+  await prisma.certificate.delete({ where: { id: certificate.id } });
+  return { codRequest: certificate.certificateIdentifier };
+}
+
 export interface CreateViafirmaRequestParams {
   companyId: string;
   profileKind: ViafirmaProfileKind;
@@ -148,6 +175,19 @@ export interface CreateViafirmaRequestResult {
 export async function createViafirmaRequest(params: CreateViafirmaRequestParams): Promise<CreateViafirmaRequestResult> {
   if (!params.termsAccepted) {
     throw new Error("termsAccepted must be true - CEA-3.0-07 art. 10.11.1.e requires accepting the profile's terms before requesting a certificate");
+  }
+
+  // One open request per company. A second one is a duplicate on Viafirma's
+  // side too (a person there reviews each), and only one of the two private
+  // keys would ever be used. Happened 2026-10-28: a rues_error request looked
+  // dead here, a second was submitted, and Viafirma had revived the first.
+  // To start over, the open one has to be discarded first (discardViafirmaRequest).
+  const open = await findOpenViafirmaRequest(params.companyId);
+  if (open) {
+    throw Object.assign(
+      new Error(`There is already an open Viafirma request (${open.certificateIdentifier}) for this company. Discard it before submitting a new one.`),
+      { statusCode: 409, code: "viafirma_request_already_open" },
+    );
   }
 
   const provider = getProvider();
@@ -294,4 +334,35 @@ export async function revokeViafirmaCertificate(params: { companyId: string; cer
   const result = await getProvider().revoke(certificate.certificateIdentifier, params.reason);
   await prisma.certificate.update({ where: { id: certificate.id }, data: { status: "INACTIVE" } });
   return result;
+}
+
+export interface ViafirmaCertificateDownload {
+  fileName: string;
+  p12Base64: string;
+  password: string;
+  expiresAt: Date | null;
+}
+
+/**
+ * The issued .p12 (private key + chain) and its password, for the company
+ * that owns it - the certificate legally belongs to the subscriber, not to
+ * us; we only custody it to sign on their behalf. Null while it is not
+ * finalized yet: before viafirmaIssuance.job.ts assembles the PKCS12 the
+ * store holds a bare PEM private key with an empty password, which is not
+ * a usable certificate and must never be handed out.
+ */
+export async function downloadViafirmaCertificate(params: {
+  companyId: string;
+  certificateId: string;
+}): Promise<ViafirmaCertificateDownload | null> {
+  const certificate = await requireViafirmaCertificate(params.companyId, params.certificateId);
+  if (certificate.status !== "ACTIVE") return null;
+  const secret = await createDefaultCertificateSecretStore().get(certificate.secretReference);
+  if (!secret.password) return null;
+  return {
+    fileName: `certificado-viafirma-${certificate.certificateIdentifier.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "")}.p12`,
+    p12Base64: secret.p12.toString("base64"),
+    password: secret.password,
+    expiresAt: certificate.expiresAt,
+  };
 }
