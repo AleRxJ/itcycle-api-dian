@@ -121,23 +121,82 @@ describe("admin provisioning", () => {
     expect(updated.documentType).toBe("91"); // never changes
   });
 
-  it("updateNumberingResolution rejects a resolution that already has documents issued against it", async () => {
+  it("updateNumberingResolution still corrects a resolution whose only documents DIAN rejected", async () => {
     const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
     const numbering = await createNumberingResolution({
       companyId: company.id,
-      documentType: "92",
-      prefix: "USED",
+      documentType: "01",
+      prefix: "SETR",
+      resolutionNumber: "WRONG",
+      startNumber: 990000000,
+      endNumber: 995000000,
+      startDate: new Date().toISOString(),
+      endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
+    });
+    // FAB05b-style round: one number claimed, invoice rejected; the
+    // dependent note never got past ERROR.
+    await prisma.numberingResolution.update({ where: { id: numbering.id }, data: { currentNumber: 990000001 } });
+    await prisma.invoice.create({
+      data: { companyId: company.id, numberingId: numbering.id, internalReference: "rejected-1", invoiceNumber: "SETR990000000", status: "REJECTED" },
+    });
+    await prisma.invoice.create({
+      data: { companyId: company.id, numberingId: numbering.id, internalReference: "error-1", status: "ERROR" },
+    });
+
+    const updated = await updateNumberingResolution({
+      companyId: company.id,
+      resolutionId: numbering.id,
+      resolutionNumber: "18760000001",
+      startNumber: 990000000,
+    });
+
+    expect(updated.resolutionNumber).toBe("18760000001");
+    // startNumber unchanged - the number the rejected invoice burned stays skipped
+    expect(updated.currentNumber).toBe(990000001);
+  });
+
+  it("updateNumberingResolution resets currentNumber only when startNumber actually changes", async () => {
+    const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    const numbering = await createNumberingResolution({
+      companyId: company.id,
+      documentType: "91",
+      prefix: "MOVE",
       resolutionNumber: "0",
       startNumber: 1,
       endNumber: 100,
       startDate: new Date().toISOString(),
       endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
     });
-    await prisma.numberingResolution.update({ where: { id: numbering.id }, data: { currentNumber: 2 } });
+    await prisma.numberingResolution.update({ where: { id: numbering.id }, data: { currentNumber: 3 } });
 
-    await expect(
-      updateNumberingResolution({ companyId: company.id, resolutionId: numbering.id, prefix: "NEW" }),
-    ).rejects.toThrow(/already has documents issued/);
+    const updated = await updateNumberingResolution({ companyId: company.id, resolutionId: numbering.id, startNumber: 50 });
+
+    expect(updated.startNumber).toBe(50);
+    expect(updated.currentNumber).toBe(50);
+  });
+
+  it("updateNumberingResolution rejects a resolution with a live document issued against it", async () => {
+    const company = await createCompany({ name: "Admin Test Co", nit: TEST_NIT, dv: TEST_DV, personType: "1" });
+    for (const [prefix, status] of [["LIVEA", "ACCEPTED"], ["LIVES", "SENT"]] as const) {
+      const numbering = await createNumberingResolution({
+        companyId: company.id,
+        documentType: "01",
+        prefix,
+        resolutionNumber: "0",
+        startNumber: 1,
+        endNumber: 100,
+        startDate: new Date().toISOString(),
+        endDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 365).toISOString(),
+      });
+      await prisma.numberingResolution.update({ where: { id: numbering.id }, data: { currentNumber: 2 } });
+      await prisma.invoice.create({
+        data: { companyId: company.id, numberingId: numbering.id, internalReference: `live-${prefix}`, invoiceNumber: `${prefix}1`, status },
+      });
+
+      await expect(
+        updateNumberingResolution({ companyId: company.id, resolutionId: numbering.id, prefix: `${prefix}X` }),
+      ).rejects.toThrow(/can no longer be edited/);
+    }
   });
 
   it("uploadCertificate stores the secret through the certificate store and never returns it", async () => {

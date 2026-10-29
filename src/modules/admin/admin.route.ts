@@ -28,6 +28,8 @@ import {
   listCompanies,
   listTestSubmissions,
   lookupAcquirer,
+  queryDianNumberingRanges,
+  applyDianNumberingRange,
   refreshDocumentStatus,
   setCertificateProviderOverride,
   setDianConfiguration,
@@ -109,7 +111,8 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // Correction-only - see updateNumberingResolution's own comment for why
-  // this rejects a resolution that already has documents issued against it.
+  // this rejects a resolution that already has live (non-rejected)
+  // documents issued against it.
   app.patch<{ Params: { id: string; resolutionId: string } }>(
     "/api/v1/admin/companies/:id/numbering-resolutions/:resolutionId",
     async (request, reply) => {
@@ -370,6 +373,29 @@ export async function registerAdminRoutes(app: FastifyInstance): Promise<void> {
       }
       const environment = request.query.environment === "PRODUCTION" ? "PRODUCTION" : request.query.environment === "SANDBOX" ? "SANDBOX" : undefined;
       const result = await lookupAcquirer({ companyId: request.params.id, identificationType, identificationNumber, environment });
+      return reply.code(200).send(result);
+    },
+  );
+
+  // DIAN GetNumberingRange for this company's own software - see
+  // admin.service.ts's queryDianNumberingRanges. Never returns the technical
+  // key itself, only whether DIAN sent one.
+  app.get<{ Params: { id: string } }>("/api/v1/admin/companies/:id/dian-numbering-ranges", async (request, reply) => {
+    const result = await queryDianNumberingRanges(request.params.id);
+    return reply.code(200).send(result);
+  });
+
+  // Loads one DIAN range as the "01" resolution + stores its technical key,
+  // re-reading DIAN server-side - see applyDianNumberingRange.
+  app.post<{ Params: { id: string }; Body: { prefix?: string; authorizationNumber?: string } }>(
+    "/api/v1/admin/companies/:id/dian-numbering-ranges/apply",
+    async (request, reply) => {
+      const prefix = `${request.body?.prefix || ""}`.trim();
+      const authorizationNumber = `${request.body?.authorizationNumber || ""}`.trim();
+      if (!prefix || !authorizationNumber) {
+        return reply.code(400).send({ message: "prefix and authorizationNumber are required" });
+      }
+      const result = await applyDianNumberingRange({ companyId: request.params.id, prefix, authorizationNumber });
       return reply.code(200).send(result);
     },
   );

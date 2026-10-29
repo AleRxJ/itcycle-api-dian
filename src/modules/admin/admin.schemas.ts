@@ -34,9 +34,10 @@ export const CreateNumberingResolutionBodySchema = z.object({
 
 // documentType is intentionally absent - it's the identity of the row, not
 // a correctable field. updateNumberingResolution (admin.service.ts) also
-// rejects the whole request once currentNumber has moved past startNumber
-// (any document has actually claimed a number), so this is only ever a
-// pre-use correction, never a way to redefine a resolution mid-flight.
+// rejects the whole request once any document DIAN accepted (or may still
+// accept) was issued against the resolution, so this is only ever a
+// correction of a resolution nothing valid depends on, never a way to
+// redefine one mid-flight.
 export const UpdateNumberingResolutionBodySchema = z.object({
   prefix: z.string().optional(),
   resolutionNumber: z.string().optional(),

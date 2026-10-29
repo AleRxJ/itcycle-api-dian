@@ -116,32 +116,76 @@ export interface UpdateNumberingResolutionParams {
 }
 
 /**
+ * Statuses whose document never became (and never will become) a valid
+ * document on DIAN's side - DIAN rejected it, or it failed before DIAN ever
+ * accepted it. Everything else (ACCEPTED, but also PENDING/PROCESSING/SENT,
+ * whose outcome isn't known yet, and CONTINGENCY, which is legally issued
+ * and only waiting to be transmitted) counts as a live document.
+ */
+const DEAD_DOCUMENT_STATUSES = ["REJECTED", "ERROR"] as const;
+
+/**
+ * How many live documents (see DEAD_DOCUMENT_STATUSES) each of the given
+ * resolutions has issued against it, across every document table that
+ * claims numbers from a NumberingResolution. Ids with none are absent from
+ * the map. Shared by updateNumberingResolution (the lock itself) and
+ * getDianReadiness (its `editable` flag) so the two can never disagree.
+ */
+async function countLiveDocumentsByResolution(numberingIds: string[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (numberingIds.length === 0) return counts;
+  const where = { numberingId: { in: numberingIds }, status: { notIn: [...DEAD_DOCUMENT_STATUSES] } };
+  const groups = await Promise.all([
+    prisma.invoice.groupBy({ by: ["numberingId"], where, _count: { _all: true } }),
+    prisma.creditNote.groupBy({ by: ["numberingId"], where, _count: { _all: true } }),
+    prisma.debitNote.groupBy({ by: ["numberingId"], where, _count: { _all: true } }),
+    prisma.supportDocument.groupBy({ by: ["numberingId"], where, _count: { _all: true } }),
+    prisma.payrollDocument.groupBy({ by: ["numberingId"], where, _count: { _all: true } }),
+    prisma.payrollAdjustment.groupBy({ by: ["numberingId"], where, _count: { _all: true } }),
+  ]);
+  for (const group of groups.flat()) {
+    if (!group.numberingId) continue;
+    counts.set(group.numberingId, (counts.get(group.numberingId) ?? 0) + group._count._all);
+  }
+  return counts;
+}
+
+/**
  * Corrects a resolution's own fields (prefix/resolutionNumber/range/dates) -
- * never documentType, which is the row's identity. Only allowed while
- * currentNumber still equals startNumber: the moment any document has
- * claimed a number from this resolution, its range/prefix become part of
- * that document's permanent record, and editing them out from under it
- * would desync what was actually issued from what the resolution now says.
- * A resolution already in use needs a NEW one (superseding it), not an
- * edit of this one.
+ * never documentType, which is the row's identity. Only refused once a LIVE
+ * document (see DEAD_DOCUMENT_STATUSES) was issued against it: its
+ * range/prefix are then part of that document's permanent record on DIAN's
+ * side, and editing them out from under it would desync what was actually
+ * issued from what the resolution now says - that case needs a NEW
+ * resolution (superseding it), not an edit of this one. Documents DIAN
+ * rejected left nothing on record, so they don't lock it: a resolution typed
+ * in wrong (e.g. FAB05b on a habilitación test set) must stay fixable.
+ *
+ * currentNumber is only reset when startNumber actually changes - otherwise
+ * the numbers already burned by rejected documents stay skipped (DIAN allows
+ * gaps).
  */
 export async function updateNumberingResolution(params: UpdateNumberingResolutionParams) {
   const existing = await prisma.numberingResolution.findUnique({ where: { id: params.resolutionId } });
   if (!existing || existing.companyId !== params.companyId) {
     throw new Error(`Numbering resolution ${params.resolutionId} not found for company ${params.companyId}`);
   }
-  if (existing.currentNumber !== existing.startNumber) {
+
+  const liveDocuments = (await countLiveDocumentsByResolution([existing.id])).get(existing.id) ?? 0;
+  if (liveDocuments > 0) {
     throw new Error(
-      `Numbering resolution ${params.resolutionId} already has documents issued against it (currentNumber ${existing.currentNumber} != startNumber ${existing.startNumber}) - it can no longer be edited, only superseded by a new one.`,
+      `Numbering resolution ${params.resolutionId} already has ${liveDocuments} document(s) issued against it that DIAN accepted or may still accept - it can no longer be edited, only superseded by a new one.`,
     );
   }
+
+  const startNumberChanged = params.startNumber !== undefined && params.startNumber !== existing.startNumber;
 
   return prisma.numberingResolution.update({
     where: { id: params.resolutionId },
     data: {
       ...(params.prefix !== undefined ? { prefix: params.prefix } : {}),
       ...(params.resolutionNumber !== undefined ? { resolutionNumber: params.resolutionNumber } : {}),
-      ...(params.startNumber !== undefined ? { startNumber: params.startNumber, currentNumber: params.startNumber } : {}),
+      ...(startNumberChanged ? { startNumber: params.startNumber, currentNumber: params.startNumber } : {}),
       ...(params.endNumber !== undefined ? { endNumber: params.endNumber } : {}),
       ...(params.startDate !== undefined ? { startDate: new Date(params.startDate) } : {}),
       ...(params.endDate !== undefined ? { endDate: new Date(params.endDate) } : {}),
@@ -218,9 +262,9 @@ export interface DianReadiness {
     documentType: string;
     prefix: string;
     resolutionNumber: string;
-    // Not secret, and needed for Ohnix's self-service edit form (91/92 only
-    // - see updateNumberingResolution) to pre-fill the current range instead
-    // of asking the owner to re-type numbers they can't otherwise see here.
+    // Not secret, and needed for Ohnix's self-service edit form (see
+    // updateNumberingResolution) to pre-fill the current range instead of
+    // asking the owner to re-type numbers they can't otherwise see here.
     startNumber: number;
     endNumber: number;
     currentNumber: number;
@@ -228,6 +272,8 @@ export interface DianReadiness {
     endDate: Date;
     status: string;
     isCurrent: boolean;
+    /** False once a live document was issued against it - updateNumberingResolution would refuse the edit. */
+    editable: boolean;
   }>;
   certificates: FirmaPassStatusCertificate[];
   /**
@@ -283,6 +329,7 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
       && (!certificate.expiresAt || certificate.expiresAt >= now)
       && (!company.certificateProviderOverride || certificate.provider === company.certificateProviderOverride),
   );
+  const liveDocumentsByResolution = await countLiveDocumentsByResolution(company.numberingResolutions.map((resolution) => resolution.id));
   const missing: string[] = [];
   if (!configurationReady) missing.push("dian_configuration");
   if (!activeInvoiceResolution) missing.push("invoice_resolution_01");
@@ -309,6 +356,7 @@ export async function getDianReadiness(companyId: string): Promise<DianReadiness
       endDate: resolution.endDate,
       status: resolution.status,
       isCurrent: resolution.status === "ACTIVE" && resolution.startDate <= now && resolution.endDate >= now && resolution.currentNumber <= resolution.endNumber,
+      editable: !liveDocumentsByResolution.has(resolution.id),
     })),
     certificates: company.certificates.map((certificate) => ({
       id: certificate.id,
@@ -762,3 +810,171 @@ export async function lookupAcquirer(params: LookupAcquirerParams) {
     message: result.message,
   };
 }
+
+export interface DianNumberingRangeSummary {
+  authorizationNumber: string;
+  prefix: string;
+  fromNumber: number;
+  toNumber: number;
+  startDate: string;
+  endDate: string;
+  /** Whether DIAN sent a technical key for this range - the key itself never leaves this service. */
+  hasTechnicalKey: boolean;
+  /** Today is inside startDate..endDate. */
+  isCurrent: boolean;
+  /** A NumberingResolution with this prefix already exists for the company. */
+  alreadyLoaded: boolean;
+}
+
+export interface DianNumberingRangesResult {
+  /** DIAN's OperationCode/OperationDescription, verbatim (e.g. "100" / a "no ranges" message). */
+  operationCode: string | null;
+  operationDescription: string | null;
+  ranges: DianNumberingRangeSummary[];
+}
+
+const textOf = (rawXml: string, tag: string): string | null => {
+  const match = rawXml.match(new RegExp(`<(?:[A-Za-z0-9_]+:)?${tag}[^>]*>([^<]*)</(?:[A-Za-z0-9_]+:)?${tag}>`));
+  return match ? match[1]!.trim() : null;
+};
+
+/**
+ * DIAN's GetNumberingRange for this company's own software (software propio:
+ * the company's NIT is both accountCode and accountCodeT): every numbering
+ * range DIAN has associated to that NIT + softwareId, with its technical key.
+ * This is what the real "01" resolution and production technical key must
+ * match - reading it straight from DIAN replaces hand-typing the formato 1876
+ * (a typed-in "1" instead of 18760000001 cost marhoma a rejected test set).
+ *
+ * Always asks PRODUCTION, like lookupAcquirer: real resolutions only exist
+ * there, and a prefix associated to the software in the catálogo shows up
+ * there whether or not this company's own environment was flipped yet. Only
+ * needs the certificate + softwareId, no numbering resolution. Always the
+ * real DianKitProvider, even in dianSimulationMode - read-only, nothing issued.
+ */
+async function fetchDianNumberingRanges(companyId: string) {
+  const company = await prisma.company.findUniqueOrThrow({
+    where: { id: companyId },
+    include: { dianConfiguration: true, numberingResolutions: { select: { prefix: true } } },
+  });
+  if (!company.dianConfiguration?.softwareId) {
+    throw new Error(`Company ${companyId} has no DianConfiguration/softwareId`);
+  }
+  const certificate = await findSigningCertificate(company);
+  const secret = await createDefaultCertificateSecretStore().get(certificate.secretReference);
+  // DianKit's constructor only loads the .p12; getNumberingRange reads just
+  // supplier.identification.number and software.id on top of it.
+  const config = {
+    certificate: secret.p12,
+    certificatePassword: secret.password,
+    environment: "1",
+    supplier: { identification: { number: company.nit } },
+    software: { id: company.dianConfiguration.softwareId },
+  } as unknown as DianKitConfig;
+  const response = await new DianKitProvider(config).getNumberingRange(company.nit);
+  return { company, response };
+}
+
+export async function queryDianNumberingRanges(companyId: string): Promise<DianNumberingRangesResult> {
+  const { company, response } = await fetchDianNumberingRanges(companyId);
+  const today = new Date().toISOString().slice(0, 10);
+  const loadedPrefixes = new Set(company.numberingResolutions.map((resolution) => resolution.prefix.toUpperCase()));
+  return {
+    operationCode: textOf(response.rawResponse, "OperationCode"),
+    operationDescription: textOf(response.rawResponse, "OperationDescription"),
+    ranges: response.ranges.map((range) => ({
+      authorizationNumber: range.authorizationNumber,
+      prefix: range.prefix,
+      fromNumber: range.fromNumber,
+      toNumber: range.toNumber,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      hasTechnicalKey: Boolean(range.technicalKey),
+      isCurrent: Boolean(range.startDate && range.endDate && range.startDate.slice(0, 10) <= today && range.endDate.slice(0, 10) >= today),
+      alreadyLoaded: loadedPrefixes.has(range.prefix.toUpperCase()),
+    })),
+  };
+}
+
+export interface ApplyDianNumberingRangeParams {
+  companyId: string;
+  prefix: string;
+  authorizationNumber: string;
+}
+
+/**
+ * Loads one of DIAN's own ranges (see queryDianNumberingRanges) as the
+ * company's "01" NumberingResolution, then stores its technical key on
+ * DianConfiguration (a failure in between leaves the resolution loaded with
+ * the old key; retrying is safe - see below). Re-queries DIAN instead of
+ * trusting anything the caller sends beyond which range it picked, so the
+ * stored resolution and key are exactly DIAN's. Meant to run right before
+ * the SANDBOX -> PRODUCTION flip (setDianEnvironment): the technical key
+ * is company-wide, and once replaced, habilitación test sends no longer
+ * match DIAN's test key.
+ *
+ * Idempotent on the prefix: if a resolution with it already exists (e.g. a
+ * retried activation), it's left alone when it already matches DIAN, and
+ * otherwise corrected in place through updateNumberingResolution's own lock
+ * instead of creating a duplicate.
+ */
+export async function applyDianNumberingRange(params: ApplyDianNumberingRangeParams) {
+  const { response } = await fetchDianNumberingRanges(params.companyId);
+  const prefix = params.prefix.trim().toUpperCase();
+  const range = response.ranges.find(
+    (candidate) => candidate.prefix.toUpperCase() === prefix && candidate.authorizationNumber === params.authorizationNumber.trim(),
+  );
+  if (!range) {
+    throw new Error(`DIAN has no numbering range ${prefix} / ${params.authorizationNumber} for company ${params.companyId}'s software`);
+  }
+  if (!range.technicalKey) {
+    throw new Error(`DIAN returned no technical key for range ${prefix} / ${range.authorizationNumber}`);
+  }
+
+  const resolutionFields = {
+    prefix: range.prefix,
+    resolutionNumber: range.authorizationNumber,
+    startNumber: range.fromNumber,
+    endNumber: range.toNumber,
+    startDate: range.startDate,
+    endDate: range.endDate,
+  };
+  const existing = await prisma.numberingResolution.findUnique({
+    where: { companyId_prefix: { companyId: params.companyId, prefix: range.prefix } },
+  });
+  const sameAsDian = existing
+    && existing.documentType === "01"
+    && existing.resolutionNumber === resolutionFields.resolutionNumber
+    && existing.startNumber === resolutionFields.startNumber
+    && existing.endNumber === resolutionFields.endNumber
+    && existing.startDate.toISOString().slice(0, 10) === resolutionFields.startDate.slice(0, 10)
+    && existing.endDate.toISOString().slice(0, 10) === resolutionFields.endDate.slice(0, 10);
+  if (existing && existing.documentType !== "01") {
+    throw new Error(`Prefix ${range.prefix} is already used by a "${existing.documentType}" resolution for company ${params.companyId}`);
+  }
+  const resolution = !existing
+    ? await createNumberingResolution({ companyId: params.companyId, documentType: "01", ...resolutionFields })
+    : sameAsDian
+      ? existing
+      : await updateNumberingResolution({ companyId: params.companyId, resolutionId: existing.id, ...resolutionFields });
+
+  await prisma.dianConfiguration.update({
+    where: { companyId: params.companyId },
+    data: { technicalKey: range.technicalKey },
+  });
+
+  return {
+    resolution: {
+      id: resolution.id,
+      documentType: resolution.documentType,
+      prefix: resolution.prefix,
+      resolutionNumber: resolution.resolutionNumber,
+      startNumber: resolution.startNumber,
+      endNumber: resolution.endNumber,
+      startDate: resolution.startDate,
+      endDate: resolution.endDate,
+    },
+    technicalKeyUpdated: true,
+  };
+}
+
