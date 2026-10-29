@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import { CreateInvoiceBodySchema, RetrySendBodySchema } from "./documents.schemas.js";
-import { createInvoice, getInvoice, getInvoiceSignedXml, retryInvoiceSend } from "./invoice.service.js";
+import { createInvoice, getInvoice, getInvoiceAttachedDocument, getInvoiceSignedXml, retryInvoiceSend } from "./invoice.service.js";
 
 /**
  * Production invoice endpoints. Gated by requireApiKey (registered in
@@ -41,6 +41,16 @@ export async function registerInvoiceRoutes(app: FastifyInstance): Promise<void>
       return reply.code(404).send({ error: "not_found" });
     }
     return reply.type("application/xml").send(signed.xml);
+  });
+
+  // DIAN AttachedDocument for the buyer (signed XML + DIAN's ApplicationResponse).
+  // 404 until the invoice is ACCEPTED with a stored DIAN answer.
+  app.get<{ Params: { id: string } }>("/api/v1/documents/invoices/:id/attached-document", async (request, reply) => {
+    const attached = await getInvoiceAttachedDocument(request.company!.id, request.params.id);
+    if (!attached) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    return reply.type("application/xml").send(attached.xml);
   });
 
   app.post<{ Params: { id: string } }>("/api/v1/documents/invoices/:id/retry-send", async (request, reply) => {

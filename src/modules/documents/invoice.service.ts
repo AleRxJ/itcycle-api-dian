@@ -14,6 +14,7 @@ import { createDefaultRawResponseStore } from "../../shared/rawResponseStore.js"
 import { claimNextNumber, loadDianConfig } from "./dianConfig.service.js";
 import { computeSentStatusFields, reconstructDocumentForResend, sendWithContingencyHandling } from "./documentSend.service.js";
 import { releaseUnsentErrorDocument } from "../../shared/startupReconcile.js";
+import { buildInvoiceAttachedDocument, extractApplicationResponse } from "./attachedDocument.xml.js";
 
 function defaultCreateProvider(config: DianKitConfig): DianProvider {
   return env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
@@ -279,6 +280,31 @@ export async function getInvoiceSignedXml(
   if (!invoice?.xmlReference) return null;
   const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
   return { xml: await xmlStore.get(invoice.xmlReference), invoiceNumber: invoice.invoiceNumber };
+}
+
+/**
+ * The invoice's DIAN AttachedDocument (signed XML + DIAN's ApplicationResponse,
+ * see attachedDocument.xml.ts) - what the buyer must receive. Null when it
+ * can't exist (yet): not this company's, not ACCEPTED, sent before the raw
+ * DIAN response was stored, or a test-set send (SendTestSetAsync answers with
+ * a zip key, never an ApplicationResponse).
+ */
+export async function getInvoiceAttachedDocument(
+  companyId: string,
+  id: string,
+  deps: Pick<DocumentServiceDeps, "xmlStore" | "rawResponseStore"> = {},
+): Promise<{ xml: string; invoiceNumber: string } | null> {
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, companyId },
+    select: { status: true, xmlReference: true, dianResponseReference: true },
+  });
+  if (invoice?.status !== "ACCEPTED" || !invoice.xmlReference || !invoice.dianResponseReference) return null;
+  const xmlStore = deps.xmlStore ?? createDefaultDocumentXmlStore();
+  const rawResponseStore = deps.rawResponseStore ?? createDefaultRawResponseStore();
+  const applicationResponseXml = extractApplicationResponse(await rawResponseStore.get(invoice.dianResponseReference));
+  if (!applicationResponseXml) return null;
+  const built = buildInvoiceAttachedDocument({ signedInvoiceXml: await xmlStore.get(invoice.xmlReference), applicationResponseXml });
+  return { xml: built.xml, invoiceNumber: built.invoiceNumber };
 }
 
 export async function getInvoice(companyId: string, id: string) {

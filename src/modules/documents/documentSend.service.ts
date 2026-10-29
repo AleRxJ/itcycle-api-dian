@@ -63,7 +63,7 @@ export function isTestSetAlreadyAcceptedMessage(statusDescription: string | null
 /**
  * A second, distinct non-terminal case DIAN's async endpoints can return:
  * the batch was accepted for later validation but DIAN's ack carries no
- * ZipKey/XmlFileName (see dian-engine's parseSendResponse — that's the only
+ * ZipKey (see dian-engine's parseSendResponse — that's the only
  * source of `trackId`), so there is nothing to poll GetStatusZip with. Since
  * `computeSentStatusFields` only recognizes "SENT" via a present `trackId`,
  * this used to fall straight into the naive isValid-based mapping and get

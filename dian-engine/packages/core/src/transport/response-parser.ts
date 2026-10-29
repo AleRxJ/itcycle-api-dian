@@ -163,7 +163,12 @@ export function parseSendResponse(rawXml: string): DianSendResponse {
   const isValid = isValidText === "true";
   const statusCode = getText(doc, "StatusCode");
   const statusDescription = getText(doc, "StatusDescription");
-  const trackId = getText(doc, "ZipKey") || getText(doc, "XmlFileName") || undefined;
+  // Only an async send's ZipKey is a trackId. SendBillSync also answers with
+  // XmlFileName (just the file's name), and treating that as a trackId made
+  // a sync send look "still validating" (SENT) - then GetStatusZip with a
+  // file name came back "Formato trackId inválido" and the first real
+  // production invoice (MARH1, 2026-10-29) got recorded as REJECTED.
+  const trackId = getText(doc, "ZipKey") || undefined;
   const errors = isValid ? [] : extractErrors(doc);
 
   return {

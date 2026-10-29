@@ -567,16 +567,25 @@ export interface RefreshDocumentStatusParams {
  * unchanged without any DIAN call, so polling this endpoint on a loop from
  * Ohnix never risks re-querying DIAN for documents that don't need it.
  */
+/** DIAN's answer to a status query made with an identifier it can't read - says nothing about the document. */
+const isBadTrackIdAnswer = (text: string | null | undefined) => /trackid inv[aá]lido/i.test(text ?? "");
+/** GetStatusZip only takes an async send's ZipKey (a UUID). */
+const isZipKey = (value: string | null | undefined) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value ?? "");
+
 export async function refreshDocumentStatus(params: RefreshDocumentStatusParams) {
   const record = await findDocumentRecord(params.documentType, params.companyId, params.id);
   if (!record) {
     throw new Error(`Document ${params.id} (type ${params.documentType}) not found for company ${params.companyId}`);
   }
-  if (record.status !== "SENT") {
+  const cufe = (record as { cufe?: string | null }).cufe ?? null;
+  // A REJECTED whose only "reason" is DIAN not understanding our own status
+  // query was never a DIAN verdict - re-ask (by CUFE) instead of keeping it.
+  const misrecorded = record.status === "REJECTED" && Boolean(cufe) && (isBadTrackIdAnswer(record.statusDescription) || isBadTrackIdAnswer(record.errorMessage));
+  if (record.status !== "SENT" && !misrecorded) {
     // Already terminal (or never sent) - nothing to refresh.
     return record;
   }
-  if (!record.trackId) {
+  if (!record.trackId && !misrecorded) {
     // Legitimately possible now, not just a caller mistake: DIAN accepted the
     // batch for async validation but issued no ZipKey (see
     // documentSend.service.ts's isStillValidatingMessage) - there is nothing
@@ -595,7 +604,18 @@ export async function refreshDocumentStatus(params: RefreshDocumentStatusParams)
   const { config } = await loadDianConfig({ companyId: params.companyId, documentType: numberingDocumentType }, secretStore);
   const provider = env.dianSimulationMode ? new SimulatedDianProvider(config) : new DianKitProvider(config);
 
-  const status = await provider.getStatusZip(record.trackId);
+  // A real async ZipKey -> GetStatusZip; anything else (a sync send's file
+  // name stored as trackId by an older engine, or a misrecorded REJECTED) ->
+  // GetStatus by CUFE, which answers for any document DIAN received.
+  const status = isZipKey(record.trackId) || !cufe
+    ? await provider.getStatusZip(record.trackId as string)
+    : await provider.getStatus(cufe);
+
+  if (isBadTrackIdAnswer(status.statusDescription) || isBadTrackIdAnswer(status.errors?.map((e) => e.description).join("; "))) {
+    // Our query was malformed - NOT a verdict on the document. Keep it as is
+    // (and never overwrite the stored DIAN answer with this one).
+    return record;
+  }
 
   if (status.statusCode === "66" || (!status.isValid && isStillValidatingMessage(status.statusDescription))) {
     // Still processing on DIAN's side - not terminal yet (either DIAN's own
