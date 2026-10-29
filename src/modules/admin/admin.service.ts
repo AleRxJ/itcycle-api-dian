@@ -5,6 +5,7 @@ import { createDefaultCertificateSecretStore } from "../../shared/certificateSto
 import { generateApiKey } from "../../shared/apiKeyAuth.js";
 import { env } from "../../shared/env.js";
 import type { DianKitConfig } from "@dian-kit/sdk-node";
+import { DianTransportError } from "@dian-kit/sdk-node";
 
 import { findSigningCertificate, loadDianConfig, type NumberedDocumentType } from "../documents/dianConfig.service.js";
 import { isStillValidatingMessage, isTestSetAlreadyAcceptedMessage } from "../documents/documentSend.service.js";
@@ -871,7 +872,17 @@ async function fetchDianNumberingRanges(companyId: string) {
     supplier: { identification: { number: company.nit } },
     software: { id: company.dianConfiguration.softwareId },
   } as unknown as DianKitConfig;
-  const response = await new DianKitProvider(config).getNumberingRange(company.nit);
+  const provider = new DianKitProvider(config);
+  // Read-only, so a network blip (seen: a router DNS refusing ~1 in 5
+  // lookups of vpfe.dian.gov.co) is safe to retry once instead of failing.
+  let response;
+  try {
+    response = await provider.getNumberingRange(company.nit);
+  } catch (error) {
+    if (!(error instanceof DianTransportError)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    response = await provider.getNumberingRange(company.nit);
+  }
   return { company, response };
 }
 
@@ -879,8 +890,18 @@ export async function queryDianNumberingRanges(companyId: string): Promise<DianN
   const { company, response } = await fetchDianNumberingRanges(companyId);
   const today = new Date().toISOString().slice(0, 10);
   const loadedPrefixes = new Set(company.numberingResolutions.map((resolution) => resolution.prefix.toUpperCase()));
+  const operationCode = textOf(response.rawResponse, "OperationCode");
+  // DIAN said OK but nothing was parsed: the response shape isn't what the
+  // parser knows (that is how the first real answer came back empty). Log it
+  // with technical keys blanked so the shape can be fixed from the log.
+  if (operationCode === "100" && response.ranges.length === 0) {
+    console.warn(
+      `[dian-numbering-ranges] DIAN answered OK with no parsed ranges for company ${companyId}:`,
+      response.rawResponse.replace(/(TechnicalKey>)[^<]*(<)/g, "$1***$2"),
+    );
+  }
   return {
-    operationCode: textOf(response.rawResponse, "OperationCode"),
+    operationCode,
     operationDescription: textOf(response.rawResponse, "OperationDescription"),
     ranges: response.ranges.map((range) => ({
       authorizationNumber: range.authorizationNumber,

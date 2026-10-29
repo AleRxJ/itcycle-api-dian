@@ -253,8 +253,15 @@ export function parseAcquirerResponse(rawXml: string): DianAcquirerResponse {
  * Parses the raw SOAP XML response from `GetNumberingRange` into a structured
  * {@link DianNumberingRangeResponse}.
  *
- * Iterates over all `<NumberRange>` elements in the response and extracts each
- * range's authorization number, prefix, number bounds, date range, and technical key.
+ * Iterates over every range element and extracts each range's authorization
+ * number, prefix, number bounds, date range, and technical key.
+ *
+ * DIAN's real production answer (seen 2026-10-29: OperationCode "100",
+ * "Acción completada OK.") lists `<NumberRangeResponse>` elements with
+ * `ResolutionNumber` / `ValidDateFrom` / `ValidDateTo`. The original fixture
+ * shape (`<NumberRange>` with `AuthorizationNumber` / `StartDate` /
+ * `EndDate`) is still accepted, so neither spelling silently yields an empty
+ * list.
  *
  * @param rawXml - Raw SOAP XML response string from the DIAN service
  * @returns Structured response with an array of authorized numbering ranges
@@ -275,25 +282,31 @@ export function parseNumberingRangeResponse(rawXml: string): DianNumberingRangeR
   const doc = parseXml(rawXml);
   checkForFault(doc, rawXml);
 
-  const rangeNodes = doc.getElementsByTagNameNS("*", "NumberRange");
+  const rangeNodes = [
+    ...Array.from(doc.getElementsByTagNameNS("*", "NumberRangeResponse")),
+    ...Array.from(doc.getElementsByTagNameNS("*", "NumberRange")),
+  ];
   const ranges: DianNumberingRange[] = [];
 
-  for (let i = 0; i < rangeNodes.length; i++) {
-    const node = rangeNodes[i];
+  for (const node of rangeNodes) {
     if (!node) continue;
 
-    const getField = (name: string): string => {
-      const el = node.getElementsByTagNameNS("*", name)[0];
-      return el?.textContent?.trim() ?? "";
+    // First non-empty of the given element names (real DIAN name first).
+    const getField = (...names: string[]): string => {
+      for (const name of names) {
+        const value = node.getElementsByTagNameNS("*", name)[0]?.textContent?.trim();
+        if (value) return value;
+      }
+      return "";
     };
 
     ranges.push({
-      authorizationNumber: getField("AuthorizationNumber"),
+      authorizationNumber: getField("ResolutionNumber", "AuthorizationNumber"),
       prefix: getField("Prefix"),
       fromNumber: parseInt(getField("FromNumber"), 10) || 0,
       toNumber: parseInt(getField("ToNumber"), 10) || 0,
-      startDate: getField("StartDate"),
-      endDate: getField("EndDate"),
+      startDate: getField("ValidDateFrom", "StartDate"),
+      endDate: getField("ValidDateTo", "EndDate"),
       technicalKey: getField("TechnicalKey"),
     });
   }

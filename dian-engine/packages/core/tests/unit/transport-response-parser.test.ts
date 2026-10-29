@@ -85,6 +85,49 @@ const NUMBERING_RANGE_RESPONSE = `<?xml version="1.0" encoding="utf-8"?>
   </s:Body>
 </s:Envelope>`;
 
+// DIAN's real GetNumberingRange answer shape (NumberRangeResponse /
+// ResolutionNumber / ValidDateFrom / ValidDateTo).
+const NUMBERING_RANGE_RESPONSE_REAL = `<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+  <s:Body>
+    <GetNumberingRangeResponse xmlns="http://wcf.dian.colombia">
+      <GetNumberingRangeResult xmlns:b="http://schemas.datacontract.org/2004/07/NumberRangeResponseList">
+        <b:OperationCode>100</b:OperationCode>
+        <b:OperationDescription>Acción completada OK.</b:OperationDescription>
+        <b:ResponseList xmlns:c="http://schemas.datacontract.org/2004/07/NumberRangeResponse">
+          <c:NumberRangeResponse>
+            <c:ResolutionNumber>18764117877028</c:ResolutionNumber>
+            <c:ResolutionDate>2026-10-29</c:ResolutionDate>
+            <c:Prefix>MARH</c:Prefix>
+            <c:FromNumber>1</c:FromNumber>
+            <c:ToNumber>10000</c:ToNumber>
+            <c:ValidDateFrom>2026-10-29</c:ValidDateFrom>
+            <c:ValidDateTo>2028-10-29</c:ValidDateTo>
+            <c:TechnicalKey>abc123technicalkey</c:TechnicalKey>
+          </c:NumberRangeResponse>
+        </b:ResponseList>
+      </GetNumberingRangeResult>
+    </GetNumberingRangeResponse>
+  </s:Body>
+</s:Envelope>`;
+
+describe("parseNumberingRangeResponse with DIAN's real shape", () => {
+  it("reads NumberRangeResponse / ResolutionNumber / ValidDateFrom / ValidDateTo", () => {
+    const result = parseNumberingRangeResponse(NUMBERING_RANGE_RESPONSE_REAL);
+    expect(result.ranges).toEqual([
+      {
+        authorizationNumber: "18764117877028",
+        prefix: "MARH",
+        fromNumber: 1,
+        toNumber: 10000,
+        startDate: "2026-10-29",
+        endDate: "2028-10-29",
+        technicalKey: "abc123technicalkey",
+      },
+    ]);
+  });
+});
+
 describe("parseSendResponse", () => {
   it("retorna isValid=true cuando DIAN acepta el documento", () => {
     const result = parseSendResponse(SEND_RESPONSE_VALID);
